@@ -12,7 +12,11 @@
   },
   "dependencies": {
     "@agentgate/config-loader": "workspace:*",
+    "@agentgate/core-types": "workspace:*",
+    "@agentgate/policy-engine": "workspace:*",
+    "@agentgate/risk-engine": "workspace:*",
     "@agentgate/runner-worker": "workspace:*",
+    "@agentgate/skill-resolver": "workspace:*",
     "@fastify/cors": "^10.0.1",
     "@prisma/client": "^5.22.0",
     "dotenv": "^16.4.5",

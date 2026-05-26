@@ -10,7 +10,7 @@ export function ExecutionConsole({ runId }: { runId: string }) {
           <p className="mt-1 text-sm text-muted">Run ID: {runId}</p>
         </div>
         <span className="rounded-ui bg-background px-2 py-1 text-xs text-muted">
-          Execution Token: unavailable in Phase 0
+          Execution Token: unavailable until Phase 3
         </span>
       </div>
       <div className="mt-5 flex flex-wrap gap-2">
@@ -28,7 +28,7 @@ export function ExecutionConsole({ runId }: { runId: string }) {
         </Button>
       </div>
       <pre className="mt-5 overflow-x-auto rounded-ui bg-foreground p-4 text-xs leading-6 text-background">
-        {`[phase-0] execution_logs table exists after migration\n[phase-0] SSE endpoint shell is reserved\n[phase-0] runner loop starts with the API process`}
+        {`[phase-1] decision records exist in skill_runs\n[phase-1] audit_events capture resolver, risk, and policy\n[phase-3] execution_logs and SSE console come next`}
       </pre>
     </section>
   );

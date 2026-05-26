@@ -15,6 +15,15 @@ importers:
       '@agentgate/config-loader':
         specifier: workspace:*
         version: link:packages/config-loader
+      '@agentgate/policy-engine':
+        specifier: workspace:*
+        version: link:packages/policy-engine
+      '@agentgate/risk-engine':
+        specifier: workspace:*
+        version: link:packages/risk-engine
+      '@agentgate/skill-resolver':
+        specifier: workspace:*
+        version: link:packages/skill-resolver
       '@eslint/js':
         specifier: ^9.15.0
         version: 9.39.4
@@ -45,9 +54,21 @@ importers:
       '@agentgate/config-loader':
         specifier: workspace:*
         version: link:../../packages/config-loader
+      '@agentgate/core-types':
+        specifier: workspace:*
+        version: link:../../packages/core-types
+      '@agentgate/policy-engine':
+        specifier: workspace:*
+        version: link:../../packages/policy-engine
+      '@agentgate/risk-engine':
+        specifier: workspace:*
+        version: link:../../packages/risk-engine
       '@agentgate/runner-worker':
         specifier: workspace:*
         version: link:../runner-worker
+      '@agentgate/skill-resolver':
+        specifier: workspace:*
+        version: link:../../packages/skill-resolver
       '@fastify/cors':
         specifier: ^10.0.1
         version: 10.1.0

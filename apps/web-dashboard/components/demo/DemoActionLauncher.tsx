@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Play } from "lucide-react";
-import { getDemoActions, replayDemoAction, type DemoActionCard } from "@/lib/api-client";
+import {
+  getDemoActions,
+  replayDemoActionJson,
+  type DecisionResponse,
+  type DemoActionCard
+} from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 
 const decisionTone: Record<DemoActionCard["expected_decision"], string> = {
@@ -15,6 +20,8 @@ const decisionTone: Record<DemoActionCard["expected_decision"], string> = {
 export function DemoActionLauncher() {
   const [actions, setActions] = useState<DemoActionCard[]>([]);
   const [status, setStatus] = useState("Loading fixture-backed demo actions...");
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [lastDecision, setLastDecision] = useState<DecisionResponse | null>(null);
 
   useEffect(() => {
     void getDemoActions()
@@ -28,8 +35,18 @@ export function DemoActionLauncher() {
   }, []);
 
   async function handleReplay(actionId: string) {
-    const response = await replayDemoAction(actionId);
-    setStatus(`Replay endpoint responded with ${response.status}. Product logic starts in Phase 1.`);
+    setPendingActionId(actionId);
+    try {
+      const response = await replayDemoActionJson(actionId);
+      setLastDecision(response.decision);
+      setStatus(
+        `${response.decision.decision} for ${response.decision.skill_id}. Trace ${response.decision.trace_id}.`
+      );
+    } catch {
+      setStatus("Replay failed. Check the API server and seed data.");
+    } finally {
+      setPendingActionId(null);
+    }
   }
 
   return (
@@ -54,13 +71,25 @@ export function DemoActionLauncher() {
               className="mt-3 w-full"
               variant="secondary"
               onClick={() => void handleReplay(action.id)}
+              disabled={pendingActionId === action.id}
             >
               <Play className="h-4 w-4" aria-hidden="true" />
-              {action.button_label}
+              {pendingActionId === action.id ? "Replaying..." : action.button_label}
             </Button>
           </article>
         ))}
       </div>
+      {lastDecision ? (
+        <div className="mt-4 rounded-ui border border-border bg-background p-3 text-xs leading-5">
+          <div className={`font-semibold ${decisionTone[lastDecision.decision]}`}>
+            {lastDecision.decision}
+          </div>
+          <div className="mt-1 text-muted">{lastDecision.reason}</div>
+          <div className="mt-2 font-mono text-[11px] text-muted">
+            run {lastDecision.run_id} · trace {lastDecision.trace_id}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

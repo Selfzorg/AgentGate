@@ -1,27 +1,63 @@
-const columns = [
-  "Time",
-  "Agent",
-  "Role",
-  "Source",
-  "Raw Action",
-  "Skill",
-  "Environment",
-  "Risk",
-  "Decision",
-  "Trace"
-];
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { getLiveActivity, type LiveActivity } from "@/lib/api-client";
+
+const columns = ["Time", "Agent", "Role", "Source", "Raw Action", "Skill", "Environment", "Risk", "Decision", "Trace"];
+
+const decisionTone: Record<string, string> = {
+  ALLOW: "bg-success/10 text-success",
+  DENY: "bg-danger/10 text-danger",
+  REQUIRE_APPROVAL: "bg-warning/10 text-warning",
+  FORCE_DRY_RUN: "bg-accent/10 text-accent"
+};
+
+const riskTone: Record<string, string> = {
+  low: "text-success",
+  medium: "text-accent",
+  high: "text-warning",
+  critical: "text-danger"
+};
 
 export function LiveActivityTable() {
+  const [activities, setActivities] = useState<LiveActivity[]>([]);
+  const [status, setStatus] = useState("Loading persisted activity...");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const response = await getLiveActivity();
+        if (!cancelled) {
+          setActivities(response.activities);
+          setStatus(`${response.activities.length} persisted decisions loaded.`);
+        }
+      } catch {
+        if (!cancelled) {
+          setStatus("API unavailable. Start the Phase 1 dev server.");
+        }
+      }
+    }
+
+    void load();
+    const interval = window.setInterval(() => void load(), 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   return (
-    <section className="overflow-hidden rounded-ui border border-border bg-surface shadow-panel">
+    <section className="min-w-0 overflow-hidden rounded-ui border border-border bg-surface shadow-panel">
       <div className="border-b border-border p-5">
         <h2 className="text-base font-semibold">Activity Stream</h2>
-        <p className="mt-1 text-sm text-muted">
-          DB-backed activity rows start when Phase 1 persists skill_runs and audit_events.
-        </p>
+        <p className="mt-1 text-sm text-muted">{status}</p>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[920px] w-full border-collapse text-left text-sm">
+        <table className="min-w-[760px] w-full border-collapse text-left text-sm">
           <thead className="bg-background text-xs uppercase text-muted">
             <tr>
               {columns.map((column) => (
@@ -32,11 +68,44 @@ export function LiveActivityTable() {
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td className="px-4 py-8 text-muted" colSpan={columns.length}>
-                No live records yet. Phase 0 is validating the foundation before product flow.
-              </td>
-            </tr>
+            {activities.length === 0 ? (
+              <tr>
+                <td className="px-4 py-8 text-muted" colSpan={columns.length}>
+                  No persisted decisions yet. Replay a demo action to create one.
+                </td>
+              </tr>
+            ) : (
+              activities.map((activity) => (
+                <tr key={activity.run_id} className="border-b border-border last:border-b-0">
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-muted">
+                    {new Date(activity.time).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit"
+                    })}
+                  </td>
+                  <td className="px-4 py-3">{activity.agent_display_name ?? activity.agent_id ?? "Unknown"}</td>
+                  <td className="px-4 py-3 text-muted">{activity.role ?? "unknown"}</td>
+                  <td className="px-4 py-3 text-muted">{activity.source}</td>
+                  <td className="max-w-[220px] truncate px-4 py-3 font-mono text-xs">{activity.raw_action}</td>
+                  <td className="px-4 py-3">{activity.skill_id ?? "unresolved"}</td>
+                  <td className="px-4 py-3 text-muted">{activity.environment ?? "n/a"}</td>
+                  <td className={`px-4 py-3 font-medium ${activity.risk_level ? riskTone[activity.risk_level] : ""}`}>
+                    {activity.risk_level ?? "n/a"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`rounded-ui px-2 py-1 text-xs font-semibold ${decisionTone[activity.decision ?? ""] ?? "bg-background text-muted"}`}>
+                      {activity.decision ?? "n/a"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Link className="font-mono text-xs text-accent" href={`/audit/${activity.trace_id}`}>
+                      {activity.trace_id}
+                    </Link>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

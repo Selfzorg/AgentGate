@@ -12,7 +12,7 @@ export default async function AuditTracePage({
     <div>
       <PageHeader
         title={`Audit Trace ${traceId}`}
-        description="Phase 0 reserves the trace route and timeline component. Persisted audit events start in Phase 1."
+        description="Persisted audit events show how AgentGate received, classified, scored, and evaluated the action."
       />
       <AuditTimeline traceId={traceId} />
     </div>

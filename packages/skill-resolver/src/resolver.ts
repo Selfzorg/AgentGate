@@ -1,20 +1,34 @@
 import type { ResolvedSkill } from "@agentgate/core-types";
-import { phaseZeroSkillMatchers } from "./matchers";
+import { canonicalSkillMatchers, destructiveProductionPatterns } from "./matchers";
 
-export function resolveSkillPlaceholder(rawAction: string): ResolvedSkill {
-  const normalized = rawAction.toLowerCase();
-  const match = phaseZeroSkillMatchers.find((candidate) =>
-    normalized.includes(candidate.pattern.toLowerCase())
+export type ResolveSkillInput = {
+  rawAction: string;
+  toolName?: string;
+  context?: {
+    environment?: string;
+  };
+};
+
+export function resolveSkill(input: ResolveSkillInput): ResolvedSkill {
+  const haystack = [input.rawAction, input.toolName].filter(Boolean).join(" ").toLowerCase();
+  const match = canonicalSkillMatchers.find((candidate) =>
+    haystack.includes(candidate.pattern.toLowerCase())
   );
 
   if (!match) {
+    const looksDestructive = destructiveProductionPatterns.some((pattern) =>
+      haystack.includes(pattern)
+    );
+
     return {
-      skill_id: "unknown-destructive",
+      skill_id: looksDestructive ? "unknown-destructive" : "unknown",
       skill_version: "0.0.0",
       category: "unknown",
-      default_risk_level: "critical",
-      confidence: 0.7,
-      resolver_reason: "Phase 0 placeholder resolver did not find a known mapping."
+      default_risk_level: looksDestructive ? "critical" : "medium",
+      confidence: looksDestructive ? 0.7 : 0.3,
+      resolver_reason: looksDestructive
+        ? "Raw action matched destructive production pattern."
+        : "Raw action did not match a known AgentGate skill mapping."
     };
   }
 
@@ -22,16 +36,13 @@ export function resolveSkillPlaceholder(rawAction: string): ResolvedSkill {
     skill_id: match.skill_id,
     skill_version: "1.0.0",
     category: match.category,
-    default_risk_level:
-      match.skill_id === "run-tests" || match.skill_id === "create-pr"
-        ? "low"
-        : match.skill_id === "deploy-staging"
-          ? "medium"
-          : match.skill_id === "drop-table" || match.skill_id === "run-db-migration"
-            ? "critical"
-            : "high",
+    default_risk_level: match.default_risk_level,
     confidence: 1,
-    resolver_reason: "Phase 0 placeholder resolver matched a PRD mapping.",
+    resolver_reason: "Raw action matched a canonical AgentGate skill mapping.",
     matched_pattern: match.pattern
   };
+}
+
+export function resolveSkillPlaceholder(rawAction: string): ResolvedSkill {
+  return resolveSkill({ rawAction });
 }

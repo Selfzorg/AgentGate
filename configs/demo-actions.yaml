@@ -110,7 +110,7 @@ actions:
     payload:
       tenant_id: tenant_demo
       workspace_id: workspace_demo
-      source: claude_code
+      source: claude-code
       adapter_type: hook
       agent:
         agent_id: agent_research_001

@@ -12,7 +12,7 @@ export default async function SkillRunDetailPage({
     <div>
       <PageHeader
         title={`Skill Run ${runId}`}
-        description="Execution controls are visible as a Phase 0 shell. Token issuance and SSE logs start in Phase 3."
+        description="Execution controls are visible as a future-phase shell. Token issuance and SSE logs start in Phase 3."
       />
       <ExecutionConsole runId={runId} />
     </div>

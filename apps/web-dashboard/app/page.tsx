@@ -26,8 +26,8 @@ export default function OverviewPage() {
   return (
     <div>
       <PageHeader
-        title="AgentGate Phase 0"
-        description="Repository foundation for the runtime control plane. Product decisions, approvals, execution, and SSE streams start after the schema-first baseline is verified."
+        title="AgentGate Phase 1"
+        description="Observe-and-decide governance is live: fixture actions flow through resolver, risk scoring, policy evaluation, persisted skill runs, and audit events."
       />
       <div className="mb-7 flex flex-wrap gap-3">
         <Button asChild>

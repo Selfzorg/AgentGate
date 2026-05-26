@@ -7,6 +7,6 @@ export type DemoPolicyRule = {
   when: Record<string, unknown>;
   decision: Decision;
   reason: string;
-  required_checks?: string[];
-  approvers?: string[];
+  required_checks?: string[] | undefined;
+  approvers?: string[] | undefined;
 };
