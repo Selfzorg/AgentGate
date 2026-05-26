@@ -26,8 +26,8 @@ export default function OverviewPage() {
   return (
     <div>
       <PageHeader
-        title="AgentGate Phase 1"
-        description="Observe-and-decide governance is live: fixture actions flow through resolver, risk scoring, policy evaluation, persisted skill runs, and audit events."
+        title="AgentGate Phase 2"
+        description="Evidence-backed approvals and dry-runs are live on top of the observe-and-decide governance path."
       />
       <div className="mb-7 flex flex-wrap gap-3">
         <Button asChild>

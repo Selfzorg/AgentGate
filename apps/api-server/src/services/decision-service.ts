@@ -1,5 +1,4 @@
 import { dirname, join, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { NormalizedActionRequest } from "@agentgate/core-types";
 import { loadDemoFixtures } from "@agentgate/config-loader";
@@ -8,6 +7,9 @@ import { scoreRisk } from "@agentgate/risk-engine";
 import { resolveSkill } from "@agentgate/skill-resolver";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { createOrUpdateApprovalRequest } from "./approval-service";
+import { createGateCheckResults } from "./gate-check-service";
+import { createId } from "./id";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -41,7 +43,11 @@ const normalizedActionRequestSchema = z.object({
       security_scan: z.enum(["passed", "failed", "unknown"]).optional(),
       rollback_plan: z.enum(["exists", "missing", "unknown"]).optional(),
       staging_deploy: z.enum(["success", "failed", "unknown"]).optional(),
-      dry_run_completed: z.boolean().optional()
+      dry_run_completed: z.boolean().optional(),
+      schema_diff_generated: z.boolean().optional(),
+      backup_exists: z.boolean().optional(),
+      required_reviews_passed: z.boolean().optional(),
+      branch_protection_satisfied: z.boolean().optional()
     })
     .default({}),
   requested_at: z.string().optional()
@@ -173,6 +179,36 @@ export function createDecisionService({
           data: skillRunData
         });
 
+        if (policy.required_checks.length > 0) {
+          await createGateCheckResults(tx, {
+            tenantId: request.tenant_id,
+            workspaceId: request.workspace_id,
+            skillRunId: runId,
+            skillId: resolvedSkill.skill_id,
+            requiredChecks: policy.required_checks,
+            context: request.context
+          });
+        }
+
+        if (policy.decision === "REQUIRE_APPROVAL") {
+          await createOrUpdateApprovalRequest(tx, {
+            tenantId: request.tenant_id,
+            workspaceId: request.workspace_id,
+            skillRunId: runId,
+            traceId,
+            riskLevel: risk.risk_level,
+            missingChecks,
+            requiredApprovers: policy.approvers,
+            evidence: {
+              policy: policy.matched_policy?.policy_id ?? null,
+              reason: policy.reason,
+              required_checks: policy.required_checks,
+              resolved_skill: resolvedSkill,
+              risk
+            }
+          });
+        }
+
         const auditMetadataBase = {
           agent: request.agent,
           raw_action: request.raw_action,
@@ -204,7 +240,23 @@ export function createDecisionService({
             auditEventData(request, runId, traceId, 4, "policy.evaluated", {
               ...auditMetadataBase,
               stage: "policy_evaluated"
-            })
+            }),
+            ...(policy.required_checks.length > 0
+              ? [
+                  auditEventData(request, runId, traceId, 5, "prerequisites.checked", {
+                    ...auditMetadataBase,
+                    stage: "prerequisites_checked"
+                  })
+                ]
+              : []),
+            ...(policy.decision === "REQUIRE_APPROVAL"
+              ? [
+                  auditEventData(request, runId, traceId, policy.required_checks.length > 0 ? 6 : 5, "approval.requested", {
+                    ...auditMetadataBase,
+                    stage: "approval_requested"
+                  })
+                ]
+              : [])
           ]
         });
       });
@@ -234,10 +286,6 @@ function normalizeRequest(
     ...request,
     source: request.source === "claude_code" ? "claude-code" : request.source
   } as NormalizedActionRequest;
-}
-
-function createId(prefix: string): string {
-  return `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 20)}`;
 }
 
 function prismaAgentSource(source: NormalizedActionRequest["source"]) {

@@ -94,7 +94,14 @@ describe("Phase 1 Decision API and MCP subset", () => {
 
     expect(decision.decision).toBe("REQUIRE_APPROVAL");
     expect(run?.traceId).toBe(decision.trace_id);
-    expect(run?.auditEvents).toHaveLength(4);
+    expect(run?.auditEvents.map((event) => event.eventType)).toEqual(
+      expect.arrayContaining([
+        "skill.invocation.received",
+        "skill.classified",
+        "risk.scored",
+        "policy.evaluated"
+      ])
+    );
   });
 
   it("handles simplified and JSON-RPC MCP payloads", async () => {

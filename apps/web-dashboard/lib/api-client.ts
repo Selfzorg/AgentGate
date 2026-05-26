@@ -98,6 +98,81 @@ export type AuditEventRecord = {
   created_at: string;
 };
 
+export type GateCheckRecord = {
+  id: string;
+  check_key: string;
+  label: string;
+  status: "passed" | "failed" | "missing" | "unknown";
+  evidence: Record<string, unknown>;
+};
+
+export type DryRunResultRecord = {
+  id: string;
+  status: string;
+  summary: string;
+  result: Record<string, unknown>;
+  artifacts: unknown;
+  created_at: string;
+};
+
+export type ApprovalRecord = {
+  id: string;
+  status: "pending" | "approved" | "denied" | "expired";
+  risk_level: "low" | "medium" | "high" | "critical";
+  approval_readiness: "ready" | "blocked";
+  missing_checks: unknown;
+  required_approvers: unknown;
+  evidence: Record<string, unknown>;
+  comment: string | null;
+  created_at: string;
+  updated_at: string;
+  skill_run: {
+    id: string;
+    trace_id: string;
+    raw_action: string;
+    source: string;
+    environment: string | null;
+    decision: DecisionResponse["decision"] | null;
+    status: string;
+    reason: string | null;
+    risk_score: number | null;
+    agent: {
+      id: string;
+      role: string;
+      display_name: string;
+    } | null;
+    skill: {
+      id: string;
+      name: string;
+    } | null;
+    gate_checks: GateCheckRecord[];
+    dry_run_result: DryRunResultRecord | null;
+  };
+};
+
+export type ApprovalActionResponse = {
+  approval: {
+    id: string;
+    status: ApprovalRecord["status"];
+    approval_readiness: string;
+    missing_checks: unknown;
+    comment: string | null;
+    updated_at: string;
+  };
+};
+
+export type DryRunResponse = {
+  dry_run_result: {
+    id: string;
+    status: string;
+    summary: string;
+    result: Record<string, unknown>;
+    artifacts: unknown;
+  };
+  decision: DecisionResponse["decision"];
+  missing_checks: string[];
+};
+
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 export async function getDemoActions(): Promise<DemoActionsResponse> {
@@ -186,4 +261,68 @@ export async function getAuditEventsByTrace(traceId: string): Promise<{ audit_ev
   }
 
   return (await response.json()) as { audit_events: AuditEventRecord[] };
+}
+
+export async function getApprovals(): Promise<{ approvals: ApprovalRecord[] }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/approvals`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load approvals: ${response.status}`);
+  }
+
+  return (await response.json()) as { approvals: ApprovalRecord[] };
+}
+
+export async function approveApproval(approvalId: string, comment: string): Promise<ApprovalActionResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/approvals/${approvalId}/approve`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ comment })
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as ApprovalActionResponse;
+}
+
+export async function denyApproval(approvalId: string, comment: string): Promise<ApprovalActionResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/approvals/${approvalId}/deny`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ comment })
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as ApprovalActionResponse;
+}
+
+export async function forceDryRun(approvalId: string): Promise<DryRunResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/approvals/${approvalId}/force-dry-run`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as DryRunResponse;
+}
+
+export async function runSkillRunDryRun(runId: string): Promise<DryRunResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs/${runId}/dry-run`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as DryRunResponse;
 }

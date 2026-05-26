@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { runDryRun } from "../services/dry-run-service";
 
 const runParamsSchema = z.object({
   run_id: z.string()
@@ -53,6 +54,11 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
         agent: true,
         skill: true,
         matchedPolicy: true,
+        approvalRequest: true,
+        dryRunResult: true,
+        gateCheckResults: {
+          orderBy: { checkKey: "asc" }
+        },
         auditEvents: {
           orderBy: { createdAt: "asc" }
         }
@@ -82,6 +88,15 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
         agent: run.agent,
         skill: run.skill,
         matched_policy: run.matchedPolicy,
+        approval_request: run.approvalRequest,
+        dry_run_result: run.dryRunResult,
+        gate_checks: run.gateCheckResults.map((check) => ({
+          id: check.id,
+          check_key: check.checkKey,
+          label: check.label,
+          status: check.status,
+          evidence: check.evidence
+        })),
         audit_events: run.auditEvents.map((event) => ({
           id: event.id,
           event_type: event.eventType,
@@ -95,11 +110,42 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  app.post("/skill-runs/:run_id/dry-run", async (_request, reply) =>
-    reply.code(501).send({ error: "Phase 2 placeholder" })
-  );
+  app.post("/skill-runs/:run_id/dry-run", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const result = await runDryRun({
+      prisma: app.services.prisma,
+      runId
+    });
 
-  app.post("/skill-runs/:run_id/execute", async (_request, reply) =>
-    reply.code(501).send({ error: "Phase 3 placeholder" })
-  );
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/skill-runs/:run_id/execute", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const run = await app.services.prisma.skillRun.findUnique({
+      where: { id: runId },
+      include: { approvalRequest: true }
+    });
+
+    if (!run) {
+      return reply.code(404).send({ error: "Skill run not found" });
+    }
+
+    if (run.status === "denied" || run.approvalRequest?.status === "denied") {
+      return reply.code(403).send({
+        error: "Execution rejected because approval was denied"
+      });
+    }
+
+    if (
+      (run.riskLevel === "high" || run.riskLevel === "critical") &&
+      run.approvalRequest?.status !== "approved"
+    ) {
+      return reply.code(403).send({
+        error: "Execution rejected because approval is required"
+      });
+    }
+
+    return reply.code(501).send({ error: "Phase 3 placeholder" });
+  });
 };
