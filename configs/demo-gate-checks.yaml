@@ -1,0 +1,24 @@
+checks:
+  deploy-production:
+    - key: ci_passed
+      label: CI passed
+    - key: tests_passed
+      label: Tests passed
+    - key: rollback_plan_exists
+      label: Rollback plan exists
+    - key: staging_deploy_successful
+      label: Staging deploy successful
+  run-db-migration:
+    - key: dry_run_completed
+      label: Dry-run completed
+    - key: schema_diff_generated
+      label: Schema diff generated
+    - key: backup_exists
+      label: Backup exists
+  merge-pr:
+    - key: ci_passed
+      label: CI passed
+    - key: required_reviews_passed
+      label: Required reviews passed
+    - key: branch_protection_satisfied
+      label: Branch protection satisfied

@@ -1,0 +1,20 @@
+{
+  "name": "@agentgate/runner-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch --exclude node_modules --exclude ../../node_modules src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentgate/connector-sdk": "workspace:*",
+    "@prisma/client": "^5.22.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

@@ -1,0 +1,175 @@
+actions:
+  - id: safe_tests
+    label: Safe test run
+    description: Code agent runs the test suite.
+    expected_decision: ALLOW
+    button_label: Replay Safe Tests
+    payload:
+      tenant_id: tenant_demo
+      workspace_id: workspace_demo
+      source: codex
+      adapter_type: hook
+      agent:
+        agent_id: agent_code_001
+        agent_type: coding_agent
+        role: code_agent
+      tool:
+        tool_name: shell
+      raw_action: pnpm test
+      context:
+        repo: agentgate
+        branch: feature/agentgate
+        environment: dev
+    payload_preview:
+      raw_action: pnpm test
+      environment: dev
+  - id: create_pr
+    label: Create pull request
+    description: Code agent opens a pull request for review.
+    expected_decision: ALLOW
+    button_label: Replay Create PR
+    payload:
+      tenant_id: tenant_demo
+      workspace_id: workspace_demo
+      source: codex
+      adapter_type: hook
+      agent:
+        agent_id: agent_code_001
+        agent_type: coding_agent
+        role: code_agent
+      tool:
+        tool_name: shell
+      raw_action: gh pr create --title "AgentGate MVP"
+      context:
+        repo: agentgate
+        branch: feature/agentgate
+        target_branch: main
+        environment: dev
+    payload_preview:
+      raw_action: gh pr create
+      target_branch: main
+  - id: merge_main
+    label: Merge main
+    description: Code agent attempts to merge a pull request into main.
+    expected_decision: REQUIRE_APPROVAL
+    button_label: Replay Merge Main
+    payload:
+      tenant_id: tenant_demo
+      workspace_id: workspace_demo
+      source: codex
+      adapter_type: hook
+      agent:
+        agent_id: agent_code_001
+        agent_type: coding_agent
+        role: code_agent
+      tool:
+        tool_name: shell
+      raw_action: gh pr merge --merge
+      context:
+        repo: agentgate
+        branch: feature/agentgate
+        target_branch: main
+        ci_status: passed
+        tests_status: passed
+    payload_preview:
+      raw_action: gh pr merge --merge
+      target_branch: main
+  - id: production_deploy
+    label: Production deploy
+    description: Release agent attempts production deployment.
+    expected_decision: REQUIRE_APPROVAL
+    button_label: Replay Production Deploy
+    payload:
+      tenant_id: tenant_demo
+      workspace_id: workspace_demo
+      source: codex
+      adapter_type: hook
+      agent:
+        agent_id: agent_code_001
+        agent_type: coding_agent
+        role: release_agent
+      tool:
+        tool_name: shell
+      raw_action: vercel deploy --prod
+      context:
+        repo: agentgate
+        service: checkout-api
+        environment: production
+        ci_status: passed
+        tests_status: passed
+        rollback_plan: exists
+        staging_deploy: success
+    payload_preview:
+      raw_action: vercel deploy --prod
+      environment: production
+  - id: research_agent_deploy
+    label: Research agent deploy
+    description: Research agent attempts production deployment.
+    expected_decision: DENY
+    button_label: Replay Research Agent Deploy
+    payload:
+      tenant_id: tenant_demo
+      workspace_id: workspace_demo
+      source: claude_code
+      adapter_type: hook
+      agent:
+        agent_id: agent_research_001
+        agent_type: research_agent
+        role: research_agent
+      tool:
+        tool_name: shell
+      raw_action: deploy production
+      context:
+        repo: agentgate
+        service: checkout-api
+        environment: production
+    payload_preview:
+      raw_action: deploy production
+      environment: production
+  - id: production_db_migration
+    label: Production DB migration
+    description: DB agent attempts a production database migration.
+    expected_decision: FORCE_DRY_RUN
+    button_label: Replay Production DB Migration
+    payload:
+      tenant_id: tenant_demo
+      workspace_id: workspace_demo
+      source: codex
+      adapter_type: hook
+      agent:
+        agent_id: agent_db_001
+        agent_type: db_agent
+        role: db_agent
+      tool:
+        tool_name: shell
+      raw_action: npm run migrate:prod
+      context:
+        database: prod-main
+        environment: production
+        dry_run_completed: false
+    payload_preview:
+      raw_action: npm run migrate:prod
+      environment: production
+  - id: mcp_drop_table
+    label: MCP drop table
+    description: MCP client attempts destructive production table drop.
+    expected_decision: DENY
+    button_label: Replay MCP Drop Table
+    payload:
+      tenant_id: tenant_demo
+      workspace_id: workspace_demo
+      source: mcp_proxy
+      adapter_type: mcp_proxy
+      agent:
+        agent_id: agent_db_001
+        agent_type: mcp_client
+        role: db_agent
+      tool:
+        tool_name: mcp.postgres.drop_table
+      raw_action: "mcp.postgres.drop_table({\"table\":\"users\"})"
+      context:
+        database: prod-main
+        environment: production
+    payload_preview:
+      raw_action: mcp.postgres.drop_table
+      environment: production

@@ -1,0 +1,79 @@
+connectors:
+  - id: connector_github_demo
+    connector_id: github-demo-connector
+    name: GitHub Demo Connector
+    type: github
+  - id: connector_db_demo
+    connector_id: db-demo-connector
+    name: Database Demo Connector
+    type: database
+  - id: connector_deployment_demo
+    connector_id: deployment-demo-connector
+    name: Deployment Demo Connector
+    type: deployment
+skills:
+  - id: skill_run_tests
+    skill_id: run-tests
+    name: Run Tests
+    category: code_quality
+    default_risk_level: low
+    connector_id: connector_github_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+  - id: skill_create_pr
+    skill_id: create-pr
+    name: Create Pull Request
+    category: source_control
+    default_risk_level: low
+    connector_id: connector_github_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+  - id: skill_merge_pr
+    skill_id: merge-pr
+    name: Merge Pull Request
+    category: source_control
+    default_risk_level: high
+    connector_id: connector_github_demo
+    version: "1.0.0"
+    live_requires_execution_token: true
+  - id: skill_deploy_staging
+    skill_id: deploy-staging
+    name: Deploy Staging
+    category: deployment
+    default_risk_level: medium
+    connector_id: connector_deployment_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+  - id: skill_deploy_production
+    skill_id: deploy-production
+    name: Deploy Production
+    category: deployment
+    default_risk_level: high
+    connector_id: connector_deployment_demo
+    version: "1.0.0"
+    live_requires_execution_token: true
+  - id: skill_run_db_migration
+    skill_id: run-db-migration
+    name: Run Database Migration
+    category: database
+    default_risk_level: critical
+    connector_id: connector_db_demo
+    version: "1.0.0"
+    live_requires_execution_token: true
+    supports_dry_run: true
+  - id: skill_drop_table
+    skill_id: drop-table
+    name: Drop Database Table
+    category: database
+    default_risk_level: critical
+    connector_id: connector_db_demo
+    version: "1.0.0"
+    live_requires_execution_token: true
+  - id: skill_unknown_destructive
+    skill_id: unknown-destructive
+    name: Unknown Destructive Action
+    category: unknown
+    default_risk_level: critical
+    connector_id: connector_deployment_demo
+    version: "0.0.0"
+    live_requires_execution_token: true

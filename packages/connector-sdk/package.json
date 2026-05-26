@@ -1,0 +1,15 @@
+{
+  "name": "@agentgate/connector-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentgate/core-types": "workspace:*"
+  }
+}

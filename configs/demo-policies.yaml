@@ -1,0 +1,89 @@
+rules:
+  - policy_id: research_agent_cannot_deploy
+    name: Research agent cannot deploy
+    priority: 100
+    when:
+      role: research_agent
+      skill: deploy-production
+    decision: DENY
+    reason: research_agent is not allowed to deploy production services.
+  - policy_id: mcp_drop_table_denied
+    name: MCP drop table denied
+    priority: 100
+    when:
+      skill: drop-table
+      environment: production
+    decision: DENY
+    reason: Destructive production table drop is blocked.
+  - policy_id: production_db_migration_force_dry_run_first
+    name: Production DB migration requires dry-run first
+    priority: 90
+    when:
+      skill: run-db-migration
+      environment: production
+      dry_run_completed: false
+    decision: FORCE_DRY_RUN
+    reason: Production database migration must run dry-run before live execution.
+    required_checks:
+      - dry_run_completed
+      - schema_diff_generated
+      - backup_exists
+  - policy_id: production_db_migration_requires_approval_after_dry_run
+    name: Production DB migration requires approval after dry-run
+    priority: 85
+    when:
+      skill: run-db-migration
+      environment: production
+      dry_run_completed: true
+    decision: REQUIRE_APPROVAL
+    reason: Production database migration requires DB owner and service owner approval after dry-run evidence.
+    required_checks:
+      - dry_run_completed
+      - schema_diff_generated
+      - backup_exists
+    approvers:
+      - db_owner
+      - service_owner
+  - policy_id: production_deploy_requires_approval
+    name: Production deploy requires approval
+    priority: 80
+    when:
+      skill: deploy-production
+      environment: production
+    decision: REQUIRE_APPROVAL
+    reason: Production deploy requires service owner approval and release evidence.
+    required_checks:
+      - ci_passed
+      - tests_passed
+      - rollback_plan_exists
+      - staging_deploy_successful
+    approvers:
+      - service_owner
+  - policy_id: merge_main_requires_approval
+    name: Merge main requires approval
+    priority: 75
+    when:
+      skill: merge-pr
+      target_branch: main
+    decision: REQUIRE_APPROVAL
+    reason: Merging to main requires approval.
+    required_checks:
+      - ci_passed
+      - required_reviews_passed
+      - branch_protection_satisfied
+    approvers:
+      - service_owner
+  - policy_id: allow_run_tests
+    name: Allow run tests
+    priority: 10
+    when:
+      skill: run-tests
+    decision: ALLOW
+    reason: Running tests is a safe low-risk action.
+  - policy_id: allow_create_pr
+    name: Allow create PR
+    priority: 10
+    when:
+      skill: create-pr
+    decision: ALLOW
+    reason: Creating a pull request is allowed for code agents.

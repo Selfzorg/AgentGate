@@ -1,0 +1,42 @@
+tenant:
+  id: tenant_demo
+  name: AgentGate Demo Tenant
+workspace:
+  id: workspace_demo
+  key: demo
+  name: Demo Workspace
+users:
+  - id: user_service_owner
+    email: service.owner@example.com
+    name: Service Owner
+    role: service_owner
+  - id: user_db_owner
+    email: db.owner@example.com
+    name: DB Owner
+    role: db_owner
+  - id: user_platform_admin
+    email: platform.admin@example.com
+    name: Platform Admin
+    role: platform_admin
+agents:
+  - id: agent_code_001
+    external_agent_id: agent_code_001
+    owner_user_id: user_service_owner
+    source: codex
+    agent_type: coding_agent
+    role: code_agent
+    display_name: Codex Code Agent
+  - id: agent_research_001
+    external_agent_id: agent_research_001
+    owner_user_id: user_service_owner
+    source: claude_code
+    agent_type: research_agent
+    role: research_agent
+    display_name: Research Agent
+  - id: agent_db_001
+    external_agent_id: agent_db_001
+    owner_user_id: user_db_owner
+    source: mcp_proxy
+    agent_type: mcp_client
+    role: db_agent
+    display_name: MCP DB Agent
