@@ -29,7 +29,7 @@ agents:
   - id: agent_research_001
     external_agent_id: agent_research_001
     owner_user_id: user_service_owner
-    source: claude_code
+    source: claude-code
     agent_type: research_agent
     role: research_agent
     display_name: Research Agent

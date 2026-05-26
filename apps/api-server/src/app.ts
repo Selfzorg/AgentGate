@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerApprovalsRoutes } from "./routes/approvals.routes";
 import { registerAuditRoutes } from "./routes/audit.routes";
+import { registerCatalogRoutes } from "./routes/catalog.routes";
 import { registerDecisionRoutes } from "./routes/decision.routes";
 import { registerDemoRoutes } from "./routes/demo.routes";
 import { registerExecutionTokenRoutes } from "./routes/execution-tokens.routes";
@@ -12,11 +13,12 @@ import { registerSseRoutes } from "./routes/sse.routes";
 
 export type AppServices = {
   prisma: PrismaClient;
+  logger?: boolean;
 };
 
 export async function createApp(services: AppServices): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: true
+    logger: services.logger ?? true
   });
 
   app.decorate("services", services);
@@ -28,7 +30,7 @@ export async function createApp(services: AppServices): Promise<FastifyInstance>
   app.get("/health", async () => ({
     ok: true,
     service: "agentgate-api",
-    phase: "0"
+    phase: "1"
   }));
 
   await app.register(registerDecisionRoutes, { prefix: "/api/v1" });
@@ -38,6 +40,7 @@ export async function createApp(services: AppServices): Promise<FastifyInstance>
   await app.register(registerSkillRunsRoutes, { prefix: "/api/v1" });
   await app.register(registerExecutionTokenRoutes, { prefix: "/api/v1" });
   await app.register(registerAuditRoutes, { prefix: "/api/v1" });
+  await app.register(registerCatalogRoutes, { prefix: "/api/v1" });
   await app.register(registerSseRoutes, { prefix: "/api/v1" });
 
   return app;

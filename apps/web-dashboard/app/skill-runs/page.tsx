@@ -7,10 +7,10 @@ export default function SkillRunsPage() {
     <div>
       <PageHeader
         title="Skill Runs"
-        description="The persisted run list will read from skill_runs after the Decision API lands in Phase 1."
+        description="Decision replay now persists skill_runs. Detailed execution controls remain reserved for later phases."
       />
       <PlaceholderPanel title="Run index placeholder">
-        No skill runs exist in Phase 0 seed data. Open a sample detail shell at{" "}
+        Use Live Activity to replay fixture actions and open audit traces. A fuller skill run index arrives with approval and execution phases. Sample detail shell:{" "}
         <Link className="font-medium text-accent" href="/skill-runs/run_demo_placeholder">
           run_demo_placeholder
         </Link>

@@ -19,7 +19,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
           <div className="hidden items-center gap-2 text-xs text-muted md:flex">
             <ShieldCheck className="h-4 w-4 text-success" aria-hidden="true" />
-            Schema-first Phase 0
+            Observe + Decide Phase 1
             <Activity className="ml-3 h-4 w-4 text-accent" aria-hidden="true" />
             API + runner placeholder
           </div>

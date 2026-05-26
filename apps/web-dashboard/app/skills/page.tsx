@@ -1,16 +1,14 @@
 import { PageHeader } from "@/components/shell/PageHeader";
-import { PlaceholderPanel } from "@/components/shell/PlaceholderPanel";
+import { SkillsRegistry } from "@/components/skills/SkillsRegistry";
 
 export default function SkillsPage() {
   return (
     <div>
       <PageHeader
         title="Skill Registry"
-        description="Seeded demo skills include tests, PR creation, merge, staging deploy, production deploy, database migration, and drop-table governance."
+        description="Seeded demo skills are loaded through the API so the UI stays independent from resolver implementation details."
       />
-      <PlaceholderPanel title="Seeded registry">
-        Phase 0 seeds skills and versions into Postgres. The dashboard registry will query them through the API in Phase 1.
-      </PlaceholderPanel>
+      <SkillsRegistry />
     </div>
   );
 }

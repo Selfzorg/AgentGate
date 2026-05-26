@@ -8,7 +8,7 @@ export default function LivePage() {
     <div>
       <PageHeader
         title="Live Activity"
-        description="Phase 0 loads demo action fixtures through the API. Decision replay and live activity persistence start in Phase 1."
+        description="Replay fixture-backed agent actions and watch actual persisted decision records appear from the API."
       />
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <LiveActivityTable />
