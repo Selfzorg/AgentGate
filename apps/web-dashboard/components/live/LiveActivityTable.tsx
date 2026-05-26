@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getLiveActivity, type LiveActivity } from "@/lib/api-client";
+import { FlaskConical } from "lucide-react";
+import { getLiveActivity, runSkillRunDryRun, type LiveActivity } from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
 
 const columns = ["Time", "Agent", "Role", "Source", "Raw Action", "Skill", "Environment", "Risk", "Decision", "Trace"];
 
@@ -23,6 +25,7 @@ const riskTone: Record<string, string> = {
 export function LiveActivityTable() {
   const [activities, setActivities] = useState<LiveActivity[]>([]);
   const [status, setStatus] = useState("Loading persisted activity...");
+  const [dryRunPending, setDryRunPending] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +52,20 @@ export function LiveActivityTable() {
       window.clearInterval(interval);
     };
   }, []);
+
+  async function handleDryRun(runId: string) {
+    setDryRunPending(runId);
+    try {
+      const result = await runSkillRunDryRun(runId);
+      setStatus(`${result.dry_run_result.summary} Approval packet is ready.`);
+      const response = await getLiveActivity();
+      setActivities(response.activities);
+    } catch {
+      setStatus("Dry-run failed. Check whether the skill supports dry-run.");
+    } finally {
+      setDryRunPending(null);
+    }
+  }
 
   return (
     <section className="min-w-0 overflow-hidden rounded-ui border border-border bg-surface shadow-panel">
@@ -94,9 +111,22 @@ export function LiveActivityTable() {
                     {activity.risk_level ?? "n/a"}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`rounded-ui px-2 py-1 text-xs font-semibold ${decisionTone[activity.decision ?? ""] ?? "bg-background text-muted"}`}>
-                      {activity.decision ?? "n/a"}
-                    </span>
+                    <div className="flex flex-col items-start gap-2">
+                      <span className={`rounded-ui px-2 py-1 text-xs font-semibold ${decisionTone[activity.decision ?? ""] ?? "bg-background text-muted"}`}>
+                        {activity.decision ?? "n/a"}
+                      </span>
+                      {activity.decision === "FORCE_DRY_RUN" ? (
+                        <Button
+                          className="h-8 px-2 text-xs"
+                          variant="secondary"
+                          disabled={dryRunPending === activity.run_id}
+                          onClick={() => void handleDryRun(activity.run_id)}
+                        >
+                          <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+                          {dryRunPending === activity.run_id ? "Running" : "Dry-Run"}
+                        </Button>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <Link className="font-mono text-xs text-accent" href={`/audit/${activity.trace_id}`}>
