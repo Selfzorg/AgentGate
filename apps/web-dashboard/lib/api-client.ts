@@ -34,10 +34,20 @@ export type DemoReplayResponse = {
 export type DemoScenarioReplayResponse = {
   scenario: string;
   decisions: DemoReplayResponse[];
+  executions?: Array<{
+    action_id: string;
+    step: string;
+    result: unknown;
+  }>;
+  runner?: {
+    scanned: number;
+    claimed: number;
+  };
 };
 
 export type LiveActivity = {
   time: string;
+  updated_at?: string;
   run_id: string;
   trace_id: string;
   agent_id: string | null;
@@ -53,6 +63,11 @@ export type LiveActivity = {
   status: string;
   reason: string | null;
   matched_policy_id: string | null;
+  latest_audit_event?: {
+    event_type: string;
+    sequence: number | null;
+    created_at: string;
+  } | null;
 };
 
 export type LiveActivityResponse = {
@@ -171,6 +186,88 @@ export type DryRunResponse = {
   };
   decision: DecisionResponse["decision"];
   missing_checks: string[];
+};
+
+export type ExecutionTokenSummary = {
+  execution_token_id: string;
+  skill_run_id: string;
+  approval_id: string | null;
+  scopes: string[];
+  ttl_seconds: number;
+  status: "issued" | "used" | "expired" | "revoked";
+  expires_at: string;
+};
+
+export type ExecutionLogRecord = {
+  id: string;
+  sequence: number;
+  level: "debug" | "info" | "warn" | "error";
+  message: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ExecutionAttemptRecord = {
+  id: string;
+  execution_token_id: string | null;
+  idempotency_key: string;
+  status: string;
+  result: Record<string, unknown>;
+  error: Record<string, unknown>;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+};
+
+export type SkillRunDetailResponse = {
+  skill_run: {
+    id: string;
+    trace_id: string;
+    raw_action: string;
+    source: string;
+    adapter_type: string;
+    environment: string | null;
+    decision: DecisionResponse["decision"] | null;
+    risk_level: "low" | "medium" | "high" | "critical" | null;
+    risk_score: number | null;
+    risk_reasons: unknown;
+    status: string;
+    reason: string | null;
+    approval_request: {
+      id: string;
+      status: ApprovalRecord["status"];
+      approvalReadiness?: string;
+      approval_readiness?: string;
+    } | null;
+    dry_run_result: unknown;
+    gate_checks: GateCheckRecord[];
+    execution_tokens: Array<{
+      id: string;
+      status: ExecutionTokenSummary["status"];
+      scopes: unknown;
+      environment: string | null;
+      approval_request_id: string | null;
+      expires_at: string;
+      used_at: string | null;
+      revoked_at: string | null;
+      created_at: string;
+    }>;
+    attempts: ExecutionAttemptRecord[];
+    execution_logs: ExecutionLogRecord[];
+    audit_events: AuditEventRecord[];
+  };
+};
+
+export type IssueExecutionTokenResponse = {
+  execution_token: ExecutionTokenSummary;
+};
+
+export type ExecuteSkillRunResponse = {
+  run_id: string;
+  status: "execution_queued" | "duplicate";
+  attempt_id?: string;
+  original_run_status?: string;
+  logs_url: string;
 };
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
@@ -325,4 +422,60 @@ export async function runSkillRunDryRun(runId: string): Promise<DryRunResponse> 
   }
 
   return (await response.json()) as DryRunResponse;
+}
+
+export async function getSkillRun(runId: string): Promise<SkillRunDetailResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs/${runId}`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load skill run: ${response.status}`);
+  }
+
+  return (await response.json()) as SkillRunDetailResponse;
+}
+
+export async function issueExecutionToken(
+  runId: string,
+  approvalId?: string | null
+): Promise<IssueExecutionTokenResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/execution-tokens`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      skill_run_id: runId,
+      ...(approvalId ? { approval_id: approvalId } : {})
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as IssueExecutionTokenResponse;
+}
+
+export async function executeSkillRun(
+  runId: string,
+  input: {
+    execution_token_id?: string;
+    idempotency_key: string;
+  }
+): Promise<ExecuteSkillRunResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs/${runId}/execute`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as ExecuteSkillRunResponse;
+}
+
+export function getSkillRunLogsUrl(runId: string): string {
+  return `${apiBaseUrl}/api/v1/skill-runs/${runId}/logs`;
 }

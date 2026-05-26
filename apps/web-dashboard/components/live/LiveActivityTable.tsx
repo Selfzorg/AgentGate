@@ -39,7 +39,7 @@ export function LiveActivityTable() {
         }
       } catch {
         if (!cancelled) {
-          setStatus("API unavailable. Start the Phase 1 dev server.");
+          setStatus("API unavailable. Start the Phase 3 dev server.");
         }
       }
     }

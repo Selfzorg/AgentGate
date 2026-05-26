@@ -8,6 +8,6 @@ export const githubDemoConnector: SkillConnector = {
     return { summary: "GitHub demo dry-run placeholder.", artifacts: [] };
   },
   async execute(_input: SkillInput, _context: ExecutionContext): Promise<ExecutionResult> {
-    return { status: "completed", summary: "GitHub demo execution placeholder." };
+    return { status: "completed", summary: "GitHub simulation completed successfully." };
   }
 };

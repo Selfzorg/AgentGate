@@ -30,7 +30,7 @@ export async function createApp(services: AppServices): Promise<FastifyInstance>
   app.get("/health", async () => ({
     ok: true,
     service: "agentgate-api",
-    phase: "2"
+    phase: "3"
   }));
 
   await app.register(registerDecisionRoutes, { prefix: "/api/v1" });

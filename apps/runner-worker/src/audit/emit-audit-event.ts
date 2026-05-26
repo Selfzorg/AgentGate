@@ -1,33 +1,37 @@
 import { randomUUID } from "node:crypto";
-import { Prisma, type LogLevel, type PrismaClient } from "@prisma/client";
+import { Prisma, type ActorType, type PrismaClient } from "@prisma/client";
 
-export type ExecutionLogInput = {
+export type RunnerAuditEventInput = {
   tenantId: string;
   workspaceId: string;
   skillRunId: string;
-  level: LogLevel;
-  message: string;
+  traceId: string;
+  eventType: string;
+  actorType?: ActorType;
+  actorId?: string | null;
   metadata?: Record<string, unknown>;
 };
 
-export async function appendExecutionLog(
+export async function emitRunnerAuditEvent(
   prisma: PrismaClient | Prisma.TransactionClient,
-  input: ExecutionLogInput
+  input: RunnerAuditEventInput
 ) {
-  const latest = await prisma.executionLog.findFirst({
-    where: { skillRunId: input.skillRunId },
+  const latest = await prisma.auditEvent.findFirst({
+    where: { traceId: input.traceId },
     orderBy: { sequence: "desc" }
   });
 
-  return prisma.executionLog.create({
+  return prisma.auditEvent.create({
     data: {
-      id: createId("elog"),
+      id: createId("aud"),
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       skillRunId: input.skillRunId,
+      traceId: input.traceId,
+      eventType: input.eventType,
+      actorType: input.actorType ?? "system",
+      actorId: input.actorId ?? "runner",
       sequence: (latest?.sequence ?? 0) + 1,
-      level: input.level,
-      message: input.message,
       metadata: (input.metadata ?? {}) as Prisma.InputJsonValue
     }
   });
