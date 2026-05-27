@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createApp } from "../apps/api-server/src/app";
 import { approveRequest } from "../apps/api-server/src/services/approval-service";
 import { createDecisionService, type DecisionServiceResult } from "../apps/api-server/src/services/decision-service";
-import { processQueuedRunsOnce } from "../apps/runner-worker/src/runner-loop";
+import { processQueuedRunById } from "../apps/runner-worker/src/runner-loop";
 import { loadDemoFixtures } from "@agentgate/config-loader";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -69,7 +69,7 @@ describe("PR3 audit integrity hardening", () => {
     });
     expect(queued.statusCode).toBe(202);
 
-    await processQueuedRunsOnce({ prisma, limit: 10 });
+    await processQueuedRunById({ prisma, runId: decision.run_id });
 
     const response = await app.inject({
       method: "GET",

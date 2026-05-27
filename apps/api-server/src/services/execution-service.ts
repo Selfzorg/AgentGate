@@ -8,6 +8,7 @@ export type QueueExecutionInput = {
   executionTokenId?: string | undefined;
   idempotencyKey: string;
   requestedBy?: string | undefined;
+  allowRetry?: boolean | undefined;
 };
 
 export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueExecutionInput) {
@@ -55,7 +56,9 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
       return { status: 403 as const, body: { error: "Execution rejected because approval was denied" } };
     }
 
-    if (["execution_queued", "executing", "completed", "failed", "rolled_back"].includes(run.status)) {
+    const isRetry = input.allowRetry === true && run.status === "failed";
+
+    if (["execution_queued", "executing", "completed", "rolled_back"].includes(run.status) || (run.status === "failed" && !isRetry)) {
       await emitExecutionRejected(tx, run, "Execution rejected because run is not queueable");
       return { status: 409 as const, body: { error: "Execution rejected because run is not queueable" } };
     }
@@ -136,6 +139,23 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
       data: { status: "execution_queued" }
     });
 
+    if (isRetry) {
+      await emitAuditEvent(tx, {
+        tenantId: run.tenantId,
+        workspaceId: run.workspaceId,
+        skillRunId: run.id,
+        traceId: run.traceId,
+        eventType: "execution.retry_requested",
+        actorType: "system",
+        actorId: input.requestedBy ?? "system",
+        metadata: {
+          attempt_id: attempt.id,
+          idempotency_key: input.idempotencyKey,
+          execution_token_id: executionToken?.id ?? null
+        }
+      });
+    }
+
     await emitAuditEvent(tx, {
       tenantId: run.tenantId,
       workspaceId: run.workspaceId,
@@ -184,6 +204,9 @@ async function validateExecutionToken(
     return { valid: false, reason: "Execution token does not match approval request" };
   }
   if (token.environment !== input.environment) return { valid: false, reason: "Execution token does not match environment" };
+  if (token.status === "used") return { valid: false, reason: "Execution token has already been used" };
+  if (token.status === "revoked") return { valid: false, reason: "Execution token has been revoked" };
+  if (token.status === "expired") return { valid: false, reason: "Execution token has expired" };
   if (token.status !== "issued") return { valid: false, reason: "Execution token is not issued" };
   if (token.expiresAt <= new Date()) {
     await prisma.executionToken.update({

@@ -29,6 +29,23 @@ export async function processQueuedRunsOnce(options: RunnerLoopOptions & { limit
   };
 }
 
+export async function processQueuedRunById(options: RunnerLoopOptions & { runId: string }) {
+  const didClaim = await claimQueuedRun(options.prisma, options.runId);
+  if (!didClaim) {
+    return {
+      scanned: 1,
+      claimed: 0
+    };
+  }
+
+  await executeSkillRun(options.prisma, options.runId);
+
+  return {
+    scanned: 1,
+    claimed: 1
+  };
+}
+
 export function startRunnerLoop(options: RunnerLoopOptions): RunnerLoopHandle {
   let stopped = false;
   let ticking = false;
