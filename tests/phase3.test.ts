@@ -693,26 +693,24 @@ describe("Phase 3 DB-backed execution log SSE", () => {
       url: `/api/v1/skill-runs/${run.id}/logs?poll_ms=10&heartbeat_ms=10`
     });
 
-    setTimeout(() => {
-      void prisma.$transaction([
-        prisma.executionLog.create({
-          data: {
-            id: `elog_${randomUUID().replaceAll("-", "").slice(0, 20)}`,
-            tenantId: run.tenantId,
-            workspaceId: run.workspaceId,
-            skillRunId: run.id,
-            sequence: 1,
-            level: "info",
-            message: "Inserted after SSE open",
-            metadata: {}
-          }
-        }),
-        prisma.skillRun.update({
-          where: { id: run.id },
-          data: { status: "completed" }
-        })
-      ]);
-    }, 25);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await prisma.executionLog.create({
+      data: {
+        id: `elog_${randomUUID().replaceAll("-", "").slice(0, 20)}`,
+        tenantId: run.tenantId,
+        workspaceId: run.workspaceId,
+        skillRunId: run.id,
+        sequence: 1,
+        level: "info",
+        message: "Inserted after SSE open",
+        metadata: {}
+      }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await prisma.skillRun.update({
+      where: { id: run.id },
+      data: { status: "completed" }
+    });
 
     const response = await responsePromise;
     expect(response.statusCode).toBe(200);

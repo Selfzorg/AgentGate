@@ -30,6 +30,10 @@ export type NormalizedActionRequest = {
     rollback_plan?: "exists" | "missing" | "unknown";
     staging_deploy?: "success" | "failed" | "unknown";
     dry_run_completed?: boolean;
+    schema_diff_generated?: boolean;
+    backup_exists?: boolean;
+    required_reviews_passed?: boolean;
+    branch_protection_satisfied?: boolean;
   };
   requested_at?: string;
 };

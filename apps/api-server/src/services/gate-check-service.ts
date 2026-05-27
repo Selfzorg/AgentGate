@@ -12,6 +12,13 @@ export type GateCheckInput = {
 
 type GateCheckStatus = "passed" | "failed" | "missing" | "unknown";
 
+export type GateCheckPreview = {
+  check_key: string;
+  label: string;
+  status: GateCheckStatus;
+  evidence: Record<string, unknown>;
+};
+
 const labels: Record<string, string> = {
   ci_passed: "CI passed",
   tests_passed: "Tests passed",
@@ -34,25 +41,47 @@ export async function createGateCheckResults(
     }
   });
 
-  const results = input.requiredChecks.map((checkKey) => {
-    const status = statusForCheck(checkKey, input.context);
-    return {
+  const results = previewGateChecks({
+    skillId: input.skillId,
+    requiredChecks: input.requiredChecks,
+    context: input.context
+  }).map((check) => ({
       id: createId("gcr"),
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       skillRunId: input.skillRunId,
-      checkKey,
-      label: labels[checkKey] ?? checkKey,
-      status,
-      evidence: evidenceForCheck(checkKey, status, input.context, input.skillId) as Prisma.InputJsonValue
-    };
-  });
+      checkKey: check.check_key,
+      label: check.label,
+      status: check.status,
+      evidence: check.evidence as Prisma.InputJsonValue
+    }));
 
   if (results.length > 0) {
     await prisma.gateCheckResult.createMany({ data: results });
   }
 
   return results;
+}
+
+export function previewGateChecks({
+  skillId,
+  requiredChecks,
+  context
+}: {
+  skillId: string;
+  requiredChecks: string[];
+  context: Record<string, unknown>;
+}): GateCheckPreview[] {
+  return requiredChecks.map((checkKey) => {
+    const status = statusForCheck(checkKey, context);
+
+    return {
+      check_key: checkKey,
+      label: labels[checkKey] ?? checkKey,
+      status,
+      evidence: evidenceForCheck(checkKey, status, context, skillId)
+    };
+  });
 }
 
 export async function getMissingChecks(

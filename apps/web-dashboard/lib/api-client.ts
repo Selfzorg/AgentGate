@@ -270,6 +270,74 @@ export type ExecuteSkillRunResponse = {
   logs_url: string;
 };
 
+export type RiskScannerSample = {
+  id: string;
+  label: string;
+  description: string;
+  expected_decision: DemoActionCard["expected_decision"];
+  payload: Record<string, unknown>;
+  payload_preview: Record<string, unknown>;
+};
+
+export type RiskScannerSimulation = {
+  mode: "simulate";
+  side_effects: Record<string, boolean>;
+  precedence: string;
+  action: {
+    raw_action: string;
+    source: string;
+    adapter_type: string;
+    agent: {
+      agent_id: string;
+      agent_type: string;
+      role: string;
+    };
+    tool: {
+      tool_name: string;
+    };
+    context: Record<string, unknown>;
+  };
+  resolved_skill: {
+    skill_id: string;
+    skill_version: string;
+    category: string;
+    default_risk_level: string;
+    confidence: number;
+    resolver_reason: string;
+    matched_pattern?: string;
+    name: string;
+    connector_id: string | null;
+    live_requires_execution_token: boolean;
+    supports_dry_run: boolean;
+  };
+  risk: {
+    score: number;
+    level: "low" | "medium" | "high" | "critical";
+    reasons: string[];
+  };
+  matched_policy: {
+    policy_id: string;
+    name: string;
+    priority: number;
+    decision: DecisionResponse["decision"];
+    reason: string;
+    required_checks: string[];
+    approvers: string[];
+  } | null;
+  gate_checks: Array<{
+    check_key: string;
+    label: string;
+    status: GateCheckRecord["status"];
+    evidence: Record<string, unknown>;
+  }>;
+  decision: DecisionResponse["decision"];
+  reason: string;
+  required_approvers: string[];
+  missing_checks: string[];
+  dry_run_required: boolean;
+  explanation: string;
+};
+
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 export async function getDemoActions(): Promise<DemoActionsResponse> {
@@ -310,6 +378,32 @@ export async function replayDemoScenario(): Promise<DemoScenarioReplayResponse> 
   }
 
   return (await response.json()) as DemoScenarioReplayResponse;
+}
+
+export async function getRiskScannerSamples(): Promise<{ samples: RiskScannerSample[] }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/risk-scanner/samples`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load risk scanner samples: ${response.status}`);
+  }
+
+  return (await response.json()) as { samples: RiskScannerSample[] };
+}
+
+export async function simulateRisk(payload: Record<string, unknown>): Promise<RiskScannerSimulation> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/risk-scanner/simulate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ payload })
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as RiskScannerSimulation;
 }
 
 export async function getLiveActivity(): Promise<LiveActivityResponse> {

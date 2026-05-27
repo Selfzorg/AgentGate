@@ -8,6 +8,7 @@ import { registerDecisionRoutes } from "./routes/decision.routes";
 import { registerDemoRoutes } from "./routes/demo.routes";
 import { registerExecutionTokenRoutes } from "./routes/execution-tokens.routes";
 import { registerMcpRoutes } from "./routes/mcp.routes";
+import { registerRiskScannerRoutes } from "./routes/risk-scanner.routes";
 import { registerSkillRunsRoutes } from "./routes/skill-runs.routes";
 import { registerSseRoutes } from "./routes/sse.routes";
 
@@ -37,6 +38,7 @@ export async function createApp(services: AppServices): Promise<FastifyInstance>
   await app.register(registerMcpRoutes, { prefix: "/api/v1" });
   await app.register(registerDemoRoutes, { prefix: "/api/v1" });
   await app.register(registerApprovalsRoutes, { prefix: "/api/v1" });
+  await app.register(registerRiskScannerRoutes, { prefix: "/api/v1" });
   await app.register(registerSkillRunsRoutes, { prefix: "/api/v1" });
   await app.register(registerExecutionTokenRoutes, { prefix: "/api/v1" });
   await app.register(registerAuditRoutes, { prefix: "/api/v1" });
