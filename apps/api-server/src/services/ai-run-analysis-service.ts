@@ -6,6 +6,7 @@ import {
   parseAiRunAnalysisOutput,
   readAiProviderConfig,
   redactForAi,
+  type AiRunAnalysisOutput,
   type AiProvider,
   type AiProviderConfig
 } from "@agentgate/ai-provider";
@@ -87,15 +88,16 @@ export async function generateRunAnalysis({
       maxOutputTokens: MAX_OUTPUT_TOKENS
     });
     const parsed = parseAiRunAnalysisOutput(response.content);
+    const safeParsed = redactAnalysisOutput(parsed, activeTokens);
     const totalTokens = response.totalTokens ?? inputTokens + (response.outputTokens ?? estimateTokens(response.content));
     const analysis = await persistAnalysis(prisma, run, {
-      summary: parsed.summary,
-      severity: parsed.severity,
-      riskNotes: parsed.risk_notes,
-      missingEvidence: parsed.missing_evidence,
-      suggestedActions: parsed.suggested_actions,
-      failureCause: parsed.failure_cause,
-      approverNotes: parsed.approver_notes,
+      summary: safeParsed.summary,
+      severity: safeParsed.severity,
+      riskNotes: safeParsed.risk_notes,
+      missingEvidence: safeParsed.missing_evidence,
+      suggestedActions: safeParsed.suggested_actions,
+      failureCause: safeParsed.failure_cause,
+      approverNotes: safeParsed.approver_notes,
       model: config.model,
       provider: config.provider,
       inputTokens: response.inputTokens ?? inputTokens,
@@ -371,6 +373,21 @@ function analysisMode(status: SkillRunStatus, approvalStatus: string | null) {
   if (approvalStatus === "pending") return "approval_assistant";
   if (status === "failed") return "failure_analysis";
   return "run_summary";
+}
+
+function redactAnalysisOutput(output: AiRunAnalysisOutput, activeTokenStrings: string[]): AiRunAnalysisOutput {
+  const clean = (value: string) => redactForAi({ value, activeTokenStrings });
+  const cleanNullable = (value: string | null) => (value ? clean(value) : null);
+
+  return {
+    summary: clean(output.summary),
+    severity: output.severity,
+    risk_notes: output.risk_notes.map(clean),
+    missing_evidence: output.missing_evidence.map(clean),
+    suggested_actions: output.suggested_actions.map(clean),
+    failure_cause: cleanNullable(output.failure_cause),
+    approver_notes: cleanNullable(output.approver_notes)
+  };
 }
 
 async function aiSpendToday(prisma: PrismaClient) {

@@ -135,3 +135,31 @@ curl 'http://localhost:4000/api/v1/audit-integrity?skill_run_id=:run_id'
 3. `feature/03-audit-integrity-hardening`
 4. `feature/04-runner-failure-retry-idempotency-hardening`
 5. `feature/05-demo-readiness-ci-report`
+
+## 2026-05-27 Continuation
+
+Two additional branches now sit on top of the original overnight stack:
+
+| Order | Branch | Target | Purpose | Status |
+| --- | --- | --- | --- | --- |
+| 6 | `feature/06-ai-run-intelligence` | `feature/05-demo-readiness-ci-report` | Optional advisory AI summaries for runs, approvals, failures, and audit traces | Implemented, verified, pushed |
+| 7 | `feature/07-demo-readiness-qa` | `feature/06-ai-run-intelligence` | UI polish, demo QA hardening, and home handoff | Verified locally |
+
+Updated merge order:
+
+1. `feature/01-governance-test-harness`
+2. `feature/02-policy-simulation-risk-scanner`
+3. `feature/03-audit-integrity-hardening`
+4. `feature/04-runner-failure-retry-idempotency-hardening`
+5. `feature/05-demo-readiness-ci-report`
+6. `feature/06-ai-run-intelligence`
+7. `feature/07-demo-readiness-qa`
+
+Current QA additions:
+
+- Shared dashboard status badges for decisions, risk, run status, token status, audit completeness, AI status, approval readiness, and gate checks.
+- Compact `/live` Demo Journey rail for Action -> Decision -> Approval -> Token -> Logs -> Audit -> AI Insights.
+- Direct run/audit links through Live Activity, approvals, run detail, and audit trace views.
+- Stored AI output is redacted in addition to AI input payloads.
+- Added `tests/demo-readiness-qa.test.ts` and `pnpm test:demo`.
+- Added `HOME_DEMO_QA_HANDOFF.md` for fresh-checkout home validation.

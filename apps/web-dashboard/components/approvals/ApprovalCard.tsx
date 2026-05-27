@@ -11,6 +11,7 @@ import {
   type ApprovalRecord
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 export function ApprovalCard() {
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
@@ -55,7 +56,7 @@ export function ApprovalCard() {
               Replay a production deploy or run the DB migration dry-run from Live Activity to create one.
             </p>
           </div>
-          <span className="rounded-ui border border-border px-2 py-1 text-xs text-muted">Phase 2</span>
+          <StatusBadge kind="approval" value="ready" label="Waiting" />
         </div>
         <p className="mt-4 text-sm text-muted">{status}</p>
       </section>
@@ -81,9 +82,11 @@ export function ApprovalCard() {
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">{approval.skill_run.reason}</p>
                 <p className="mt-2 font-mono text-xs text-muted">{approval.skill_run.raw_action}</p>
               </div>
-              <div className="text-right">
-                <div className="text-sm font-semibold">{approval.status}</div>
-                <div className="text-xs text-muted">{approval.risk_level} risk · {approval.approval_readiness}</div>
+              <div className="flex flex-wrap justify-start gap-2 md:justify-end">
+                <StatusBadge kind="approval" value={approval.status} />
+                <StatusBadge kind="approval" value={approval.approval_readiness} label={`readiness ${approval.approval_readiness}`} />
+                <StatusBadge kind="risk" value={approval.risk_level} />
+                <StatusBadge kind="run" value={approval.skill_run.status} />
               </div>
             </div>
 
@@ -94,17 +97,7 @@ export function ApprovalCard() {
                   {approval.skill_run.gate_checks.map((check) => (
                     <div key={check.id} className="flex items-center justify-between rounded-ui border border-border px-3 py-2 text-sm">
                       <span>{check.label}</span>
-                      <span
-                        className={
-                          check.status === "passed"
-                            ? "font-semibold text-success"
-                            : check.status === "failed"
-                              ? "font-semibold text-danger"
-                              : "font-semibold text-warning"
-                        }
-                      >
-                        {check.status}
-                      </span>
+                      <StatusBadge kind="gate" value={check.status} />
                     </div>
                   ))}
                 </div>
@@ -166,6 +159,12 @@ export function ApprovalCard() {
                 <Link href={`/audit/${approval.skill_run.trace_id}`}>
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
                   Open Trace
+                </Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href={`/skill-runs/${approval.skill_run.id}`}>
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  Open Run
                 </Link>
               </Button>
             </div>

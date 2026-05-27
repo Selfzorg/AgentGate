@@ -13,6 +13,7 @@ import {
   type SkillRunDetailResponse
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 export function ExecutionConsole({ runId }: { runId: string }) {
   const [run, setRun] = useState<SkillRunDetailResponse["skill_run"] | null>(null);
@@ -159,25 +160,38 @@ export function ExecutionConsole({ runId }: { runId: string }) {
           <p className="mt-1 text-sm text-muted">Run ID: {runId}</p>
           {run ? <p className="mt-1 font-mono text-xs text-muted">{run.raw_action}</p> : null}
         </div>
-        <span className="rounded-ui bg-background px-2 py-1 text-xs text-muted">
-          {token ? `Token ${token.status}: ${token.execution_token_id}` : "Token: not issued"}
-        </span>
+        <div className="flex max-w-full flex-col items-start gap-2 sm:items-end">
+          <StatusBadge kind="run" value={run?.status ?? "loading"} />
+          <StatusBadge kind="token" value={token?.status ?? "not_issued"} label={token ? `token ${token.status}` : "token not issued"} />
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
         <div className="rounded-ui border border-border bg-background p-3">
           <div className="text-xs uppercase text-muted">Run Status</div>
-          <div className="mt-1 font-semibold">{run?.status ?? "loading"}</div>
+          <div className="mt-2">
+            <StatusBadge kind="run" value={run?.status ?? "loading"} />
+          </div>
         </div>
         <div className="rounded-ui border border-border bg-background p-3">
-          <div className="text-xs uppercase text-muted">Risk</div>
-          <div className="mt-1 font-semibold">{run?.risk_level ?? "n/a"}</div>
+          <div className="text-xs uppercase text-muted">Decision + Risk</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <StatusBadge kind="decision" value={run?.decision} />
+            <StatusBadge kind="risk" value={run?.risk_level} />
+          </div>
         </div>
         <div className="rounded-ui border border-border bg-background p-3">
           <div className="text-xs uppercase text-muted">Logs</div>
-          <div className="mt-1 font-semibold">{logs.length}</div>
+          <div className="mt-1 font-semibold">{logs.length} persisted</div>
         </div>
       </div>
+
+      {token ? (
+        <div className="mt-3 rounded-ui border border-border bg-background p-3 text-xs text-muted">
+          Browser-visible token metadata only: <span className="font-mono">{token.execution_token_id}</span>. Raw token
+          secret is never returned by the API.
+        </div>
+      ) : null}
 
       <div className="mt-5 flex flex-wrap gap-2">
         <Button variant="secondary" disabled={!canIssueToken} onClick={() => void handleIssueToken()}>
@@ -203,11 +217,16 @@ export function ExecutionConsole({ runId }: { runId: string }) {
       </div>
 
       <p className="mt-4 text-sm text-muted">{status}</p>
-      <pre className="mt-5 max-h-[360px] overflow-auto rounded-ui bg-foreground p-4 text-xs leading-6 text-background">
-        {logs.length === 0
-          ? "[logs] waiting for execution_logs rows"
-          : logs.map((log) => `[${log.sequence}] ${log.level.toUpperCase()} ${log.message}`).join("\n")}
-      </pre>
+      <div className="mt-5 overflow-hidden rounded-ui border border-border">
+        <div className="border-b border-border bg-background px-3 py-2 text-xs uppercase text-muted">
+          Execution Logs
+        </div>
+        <pre className="max-h-[360px] overflow-auto bg-foreground p-4 text-xs leading-6 text-background">
+          {logs.length === 0
+            ? "[logs] waiting for execution_logs rows"
+            : logs.map((log) => `[${log.sequence}] ${log.level.toUpperCase()} ${log.message}`).join("\n")}
+        </pre>
+      </div>
     </section>
   );
 }

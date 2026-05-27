@@ -2,13 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSkills, type SkillRecord } from "@/lib/api-client";
-
-const riskTone: Record<SkillRecord["default_risk_level"], string> = {
-  low: "text-success",
-  medium: "text-accent",
-  high: "text-warning",
-  critical: "text-danger"
-};
+import { StatusBadge } from "@/components/ui/status-badge";
 
 export function SkillsRegistry() {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
@@ -41,13 +35,16 @@ export function SkillsRegistry() {
               <div className="font-mono text-xs">connector {skill.connector ?? "none"}</div>
             </div>
             <div className="text-left md:text-right">
-              <div className={`text-sm font-semibold ${riskTone[skill.default_risk_level]}`}>
-                {skill.default_risk_level}
-              </div>
+              <StatusBadge kind="risk" value={skill.default_risk_level} />
               <div className="font-mono text-xs text-muted">v{skill.version}</div>
             </div>
           </article>
         ))}
+        {skills.length === 0 ? (
+          <div className="p-5 text-sm text-muted">
+            No skills loaded yet. Run migration and seed before the demo.
+          </div>
+        ) : null}
       </div>
     </section>
   );

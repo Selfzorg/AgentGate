@@ -1,29 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Loader2, Search, ShieldAlert } from "lucide-react";
+import { ClipboardCheck, Loader2, Search } from "lucide-react";
 import {
   getRiskScannerSamples,
   simulateRisk,
-  type DecisionResponse,
   type RiskScannerSample,
   type RiskScannerSimulation
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
-
-const decisionTone: Record<DecisionResponse["decision"], string> = {
-  ALLOW: "border-success/30 bg-success/10 text-success",
-  DENY: "border-danger/30 bg-danger/10 text-danger",
-  REQUIRE_APPROVAL: "border-warning/30 bg-warning/10 text-warning",
-  FORCE_DRY_RUN: "border-accent/30 bg-accent/10 text-accent"
-};
-
-const riskTone: Record<RiskScannerSimulation["risk"]["level"], string> = {
-  low: "text-success",
-  medium: "text-accent",
-  high: "text-warning",
-  critical: "text-danger"
-};
+import { StatusBadge } from "@/components/ui/status-badge";
 
 export function RiskScannerPanel() {
   const [samples, setSamples] = useState<RiskScannerSample[]>([]);
@@ -31,6 +17,7 @@ export function RiskScannerPanel() {
   const [payloadText, setPayloadText] = useState("");
   const [simulation, setSimulation] = useState<RiskScannerSimulation | null>(null);
   const [status, setStatus] = useState("Loading samples...");
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [isSimulating, setIsSimulating] = useState(false);
 
   const selectedSample = useMemo(
@@ -48,8 +35,12 @@ export function RiskScannerPanel() {
           setPayloadText(JSON.stringify(first.payload, null, 2));
         }
         setStatus("Ready");
+        setLoadState("ready");
       })
-      .catch(() => setStatus("API unavailable"));
+      .catch(() => {
+        setStatus("API unavailable");
+        setLoadState("error");
+      });
   }, []);
 
   function loadSample(sample: RiskScannerSample) {
@@ -66,8 +57,8 @@ export function RiskScannerPanel() {
       const result = await simulateRisk(payload);
       setSimulation(result);
       setStatus(result.decision);
-    } catch {
-      setStatus("Simulation failed");
+    } catch (error) {
+      setStatus(error instanceof SyntaxError ? "Payload JSON is invalid" : "Simulation failed");
     } finally {
       setIsSimulating(false);
     }
@@ -97,11 +88,24 @@ export function RiskScannerPanel() {
             >
               <span className="block text-sm font-medium">{sample.label}</span>
               <span className="mt-1 block text-xs leading-5">{sample.description}</span>
-              <span className={`mt-2 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${decisionTone[sample.expected_decision]}`}>
-                {sample.expected_decision}
-              </span>
+              <StatusBadge className="mt-2" kind="decision" value={sample.expected_decision} />
             </button>
           ))}
+          {loadState === "loading" ? (
+            <div className="rounded-ui border border-dashed border-border p-3 text-sm text-muted">
+              Loading samples from configs/demo-actions.yaml through the API...
+            </div>
+          ) : null}
+          {loadState === "ready" && samples.length === 0 ? (
+            <div className="rounded-ui border border-dashed border-border p-3 text-sm text-muted">
+              No scanner samples returned. Rerun the seed command.
+            </div>
+          ) : null}
+          {loadState === "error" ? (
+            <div className="rounded-ui border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+              API unavailable. Start the API server and refresh this page.
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -133,8 +137,6 @@ export function RiskScannerPanel() {
 }
 
 function SimulationResult({ simulation }: { simulation: RiskScannerSimulation }) {
-  const Icon = simulation.decision === "ALLOW" ? CheckCircle2 : simulation.decision === "DENY" ? ShieldAlert : AlertTriangle;
-
   return (
     <section className="rounded-ui border border-border bg-surface p-5 shadow-panel">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
@@ -142,10 +144,7 @@ function SimulationResult({ simulation }: { simulation: RiskScannerSimulation })
           <h2 className="text-base font-semibold">Preview</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">{simulation.explanation}</p>
         </div>
-        <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold ${decisionTone[simulation.decision]}`}>
-          <Icon className="h-4 w-4" aria-hidden="true" />
-          {simulation.decision}
-        </span>
+        <StatusBadge kind="decision" value={simulation.decision} />
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -156,8 +155,9 @@ function SimulationResult({ simulation }: { simulation: RiskScannerSimulation })
         </div>
         <div className="rounded-ui border border-border bg-background p-4">
           <div className="text-xs uppercase text-muted">Risk</div>
-          <div className={`mt-2 text-sm font-semibold ${riskTone[simulation.risk.level]}`}>
-            {simulation.risk.level} · {simulation.risk.score}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <StatusBadge kind="risk" value={simulation.risk.level} />
+            <span className="text-sm font-semibold">{simulation.risk.score}</span>
           </div>
           <div className="mt-1 text-xs text-muted">{simulation.risk.reasons[0]}</div>
         </div>
@@ -180,7 +180,7 @@ function SimulationResult({ simulation }: { simulation: RiskScannerSimulation })
               simulation.gate_checks.map((check) => (
                 <div key={check.check_key} className="flex items-center justify-between gap-3 text-sm">
                   <span>{check.label}</span>
-                  <span className={check.status === "passed" ? "text-success" : "text-warning"}>{check.status}</span>
+                  <StatusBadge kind="gate" value={check.status} />
                 </div>
               ))
             ) : (

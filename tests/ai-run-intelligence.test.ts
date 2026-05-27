@@ -138,7 +138,7 @@ describe("AI Run Intelligence", () => {
     expect(run.auditEvents.map((event) => event.eventType)).toContain("approval.granted");
   });
 
-  it("redacts raw tokens, token IDs, token hashes, authorization headers, and secrets before model calls", async () => {
+  it("redacts raw tokens, token IDs, token hashes, authorization headers, and secrets before model calls and stored analysis", async () => {
     const decision = await replay("safe_tests");
     const activeToken = "agentgate-live-token-for-redaction";
     const fakeHash = "a".repeat(64);
@@ -172,9 +172,19 @@ describe("AI Run Intelligence", () => {
         }
       }
     });
-    const provider = new CapturingProvider();
+    const provider = new CapturingProvider(
+      JSON.stringify({
+        summary: `Provider echoed ${activeToken} ${fakeTokenId} ${fakeHash} Authorization: Bearer provider-secret`,
+        severity: "high",
+        risk_notes: [`secret=provider-secret ${activeToken}`],
+        missing_evidence: [],
+        suggested_actions: [`Do not show ${fakeTokenId}`],
+        failure_cause: null,
+        approver_notes: null
+      })
+    );
 
-    await generateRunAnalysis({
+    const result = await generateRunAnalysis({
       prisma,
       runId: decision.run_id,
       provider,
@@ -189,6 +199,13 @@ describe("AI Run Intelligence", () => {
     expect(payload).not.toContain("should-not-leave");
     expect(payload).not.toContain("api-key-should-not-leave");
     expect(payload).not.toContain("password-should-not-leave");
+
+    const storedAnalysis = JSON.stringify(result.body.ai_analysis);
+    expect(storedAnalysis).toContain("[REDACTED_AGENTGATE_TOKEN]");
+    expect(storedAnalysis).not.toContain(activeToken);
+    expect(storedAnalysis).not.toContain(fakeTokenId);
+    expect(storedAnalysis).not.toContain(fakeHash);
+    expect(storedAnalysis).not.toContain("provider-secret");
   });
 
   it("does not introduce raw-token storage in the execution token schema", async () => {

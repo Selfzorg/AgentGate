@@ -9,6 +9,7 @@ import {
   type SkillRunDetailResponse
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 type InsightTab = "summary" | "approval" | "failure";
 
@@ -77,7 +78,10 @@ export function AiInsightsEngine({
             <BrainCircuit className="h-4 w-4 text-accent" aria-hidden="true" />
             AI Insights Engine
           </h2>
-          <p className="mt-1 text-xs text-muted">{status}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <StatusBadge kind="ai" value={analysis?.status ?? (pending ? "running" : "idle")} label={analysis?.status ?? status} />
+            {analysis ? <StatusBadge kind="risk" value={analysis.severity} label={`severity ${analysis.severity}`} /> : null}
+          </div>
         </div>
         <Button variant="secondary" disabled={pending} onClick={() => void handleGenerate()}>
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
@@ -105,8 +109,8 @@ export function AiInsightsEngine({
       </div>
 
       {analysis ? (
-        <div className="mt-4 border-t border-border pt-3 text-xs text-muted">
-          {analysis.status} · {analysis.total_tokens} tokens · {analysis.estimated_cost_cents} cents
+        <div className="mt-4 border-t border-border pt-3 text-xs leading-5 text-muted">
+          Advisory only · {analysis.total_tokens} tokens · {analysis.estimated_cost_cents} cents · {analysis.model}
         </div>
       ) : null}
     </aside>
@@ -138,7 +142,7 @@ function InsightBody({ analysis, tab }: { analysis: AiRunAnalysisRecord; tab: In
     <div>
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-xs uppercase text-muted">Advisory Summary</h3>
-        <span className="rounded-ui bg-background px-2 py-1 text-xs text-muted">{analysis.severity}</span>
+        <StatusBadge kind="risk" value={analysis.severity} label={analysis.severity} />
       </div>
       <p className="mt-2">{analysis.summary}</p>
       <InsightList title="Risk Notes" value={analysis.risk_notes} />

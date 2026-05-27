@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 import {
   getAuditIntegrityByTrace,
@@ -11,6 +11,7 @@ import {
   type AuditEventRecord,
   type SkillRunDetailResponse
 } from "@/lib/api-client";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 export function AuditTimeline({ traceId }: { traceId: string }) {
   const [events, setEvents] = useState<AuditEventRecord[]>([]);
@@ -61,18 +62,23 @@ export function AuditTimeline({ traceId }: { traceId: string }) {
           </p>
         </div>
         {runId ? (
-          <Link className="inline-flex items-center gap-2 text-sm text-accent" href={`/skill-runs/${runId}`}>
-            <ExternalLink className="h-4 w-4" aria-hidden="true" />
-            Open Skill Run
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            {integrity ? (
+              <StatusBadge kind="audit" value={integrity.complete ? "complete" : "incomplete"} />
+            ) : null}
+            <Link className="inline-flex items-center gap-2 text-sm text-accent" href={`/skill-runs/${runId}`}>
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+              Open Skill Run
+            </Link>
+          </div>
         ) : null}
       </div>
 
       {run ? (
         <div className="mt-5 grid gap-3 text-sm md:grid-cols-4">
-          <SummaryTile label="Run Status" value={run.status} />
-          <SummaryTile label="Decision" value={run.decision ?? "n/a"} />
-          <SummaryTile label="Risk" value={run.risk_level ?? "n/a"} />
+          <SummaryTile label="Run Status" badge={<StatusBadge kind="run" value={run.status} />} />
+          <SummaryTile label="Decision" badge={<StatusBadge kind="decision" value={run.decision} />} />
+          <SummaryTile label="Risk" badge={<StatusBadge kind="risk" value={run.risk_level} />} />
           <SummaryTile label="Execution Logs" value={String(run.execution_logs.length)} />
         </div>
       ) : null}
@@ -135,7 +141,12 @@ export function AuditTimeline({ traceId }: { traceId: string }) {
                 Tokens:{" "}
                 {run.execution_tokens.length === 0
                   ? "none"
-                  : run.execution_tokens.map((token) => `${token.id} (${token.status})`).join(", ")}
+                  : run.execution_tokens.map((token) => (
+                      <span key={token.id} className="mr-2 inline-flex items-center gap-2">
+                        <span className="font-mono text-xs text-muted">{token.id}</span>
+                        <StatusBadge kind="token" value={token.status} />
+                      </span>
+                    ))}
               </div>
               <div className="px-3 py-2 text-sm">
                 Attempts:{" "}
@@ -182,11 +193,11 @@ export function AuditTimeline({ traceId }: { traceId: string }) {
   );
 }
 
-function SummaryTile({ label, value }: { label: string; value: string }) {
+function SummaryTile({ label, value, badge }: { label: string; value?: string; badge?: ReactNode }) {
   return (
     <div className="rounded-ui border border-border bg-background p-3">
       <div className="text-xs uppercase text-muted">{label}</div>
-      <div className="mt-1 font-semibold">{value}</div>
+      <div className="mt-2 font-semibold">{badge ?? value}</div>
     </div>
   );
 }
