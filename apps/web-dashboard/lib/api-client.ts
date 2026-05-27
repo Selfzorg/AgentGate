@@ -113,6 +113,22 @@ export type AuditEventRecord = {
   created_at: string;
 };
 
+export type AuditIntegrityRecord = {
+  trace_id: string | null;
+  skill_run_id: string | null;
+  complete: boolean;
+  lifecycle_status: string | null;
+  required_events: string[];
+  observed_events: string[];
+  missing_events: string[];
+  sequence: {
+    event_count: number;
+    complete: boolean;
+    issues: string[];
+  };
+  checked_at: string;
+};
+
 export type GateCheckRecord = {
   id: string;
   check_key: string;
@@ -452,6 +468,18 @@ export async function getAuditEventsByTrace(traceId: string): Promise<{ audit_ev
   }
 
   return (await response.json()) as { audit_events: AuditEventRecord[] };
+}
+
+export async function getAuditIntegrityByTrace(traceId: string): Promise<{ audit_integrity: AuditIntegrityRecord }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/audit-integrity?trace_id=${encodeURIComponent(traceId)}`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load audit integrity: ${response.status}`);
+  }
+
+  return (await response.json()) as { audit_integrity: AuditIntegrityRecord };
 }
 
 export async function getApprovals(): Promise<{ approvals: ApprovalRecord[] }> {
