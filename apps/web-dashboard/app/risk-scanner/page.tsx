@@ -1,16 +1,14 @@
 import { PageHeader } from "@/components/shell/PageHeader";
-import { PlaceholderPanel } from "@/components/shell/PlaceholderPanel";
+import { RiskScannerPanel } from "@/components/risk-scanner/RiskScannerPanel";
 
 export default function RiskScannerPage() {
   return (
     <div>
       <PageHeader
         title="Risk Scanner"
-        description="Risk scoring rules are scaffolded for later implementation against normalized action requests."
+        description="Preview resolved skill, risk, policy, checks, and decision without creating governance records."
       />
-      <PlaceholderPanel title="Scanner placeholder">
-        Paste-and-score behavior starts after the Phase 1 resolver and risk engine are wired to the API.
-      </PlaceholderPanel>
+      <RiskScannerPanel />
     </div>
   );
 }
