@@ -2,16 +2,19 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 import {
+  getAuditIntegrityByTrace,
   getAuditEventsByTrace,
   getSkillRun,
+  type AuditIntegrityRecord,
   type AuditEventRecord,
   type SkillRunDetailResponse
 } from "@/lib/api-client";
 
 export function AuditTimeline({ traceId }: { traceId: string }) {
   const [events, setEvents] = useState<AuditEventRecord[]>([]);
+  const [integrity, setIntegrity] = useState<AuditIntegrityRecord | null>(null);
   const [run, setRun] = useState<SkillRunDetailResponse["skill_run"] | null>(null);
   const [status, setStatus] = useState("Loading audit events...");
 
@@ -22,9 +25,13 @@ export function AuditTimeline({ traceId }: { traceId: string }) {
 
     async function load() {
       try {
-        const response = await getAuditEventsByTrace(traceId);
+        const [response, integrityResponse] = await Promise.all([
+          getAuditEventsByTrace(traceId),
+          getAuditIntegrityByTrace(traceId)
+        ]);
         if (cancelled) return;
         setEvents(response.audit_events);
+        setIntegrity(integrityResponse.audit_integrity);
         setStatus(`${response.audit_events.length} audit events loaded.`);
 
         const linkedRunId = response.audit_events.find((event) => event.skill_run_id)?.skill_run_id;
@@ -67,6 +74,39 @@ export function AuditTimeline({ traceId }: { traceId: string }) {
           <SummaryTile label="Decision" value={run.decision ?? "n/a"} />
           <SummaryTile label="Risk" value={run.risk_level ?? "n/a"} />
           <SummaryTile label="Execution Logs" value={String(run.execution_logs.length)} />
+        </div>
+      ) : null}
+
+      {integrity ? (
+        <div
+          className={`mt-5 rounded-ui border p-4 text-sm ${
+            integrity.complete
+              ? "border-success/30 bg-success/10 text-success"
+              : "border-warning/30 bg-warning/10 text-warning"
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            {integrity.complete ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4" aria-hidden="true" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-4 w-4" aria-hidden="true" />
+            )}
+            <div>
+              <div className="font-semibold">
+                Audit trace {integrity.complete ? "complete" : "incomplete"}
+              </div>
+              <div className="mt-1 text-xs">
+                {integrity.complete
+                  ? `${integrity.observed_events.length} lifecycle events observed with ordered sequences.`
+                  : `Missing ${integrity.missing_events.length} event(s); ${integrity.sequence.issues.length} sequence issue(s).`}
+              </div>
+              {!integrity.complete ? (
+                <div className="mt-2 font-mono text-xs">
+                  {[...integrity.missing_events, ...integrity.sequence.issues].join(" · ")}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
       ) : null}
 
