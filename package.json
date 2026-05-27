@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
+    "test:governance": "vitest run tests/phase3.test.ts tests/risk-scanner.test.ts tests/audit-integrity.test.ts tests/runner-hardening.test.ts",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev --name init",
     "db:seed": "prisma db seed",
