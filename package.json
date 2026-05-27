@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
+    "test:ai": "vitest run tests/ai-run-intelligence.test.ts",
     "test:governance": "vitest run tests/phase3.test.ts tests/risk-scanner.test.ts tests/audit-integrity.test.ts tests/runner-hardening.test.ts",
     "verify": "pnpm lint && pnpm typecheck && pnpm test",
     "db:generate": "prisma generate",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@agentgate/config-loader": "workspace:*",
+    "@agentgate/ai-provider": "workspace:*",
     "@agentgate/policy-engine": "workspace:*",
     "@agentgate/risk-engine": "workspace:*",
     "@agentgate/skill-resolver": "workspace:*",

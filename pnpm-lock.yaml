@@ -12,6 +12,9 @@ importers:
         specifier: ^5.22.0
         version: 5.22.0(prisma@5.22.0)
     devDependencies:
+      '@agentgate/ai-provider':
+        specifier: workspace:*
+        version: link:packages/ai-provider
       '@agentgate/config-loader':
         specifier: workspace:*
         version: link:packages/config-loader
@@ -51,6 +54,9 @@ importers:
 
   apps/api-server:
     dependencies:
+      '@agentgate/ai-provider':
+        specifier: workspace:*
+        version: link:../../packages/ai-provider
       '@agentgate/config-loader':
         specifier: workspace:*
         version: link:../../packages/config-loader
@@ -156,6 +162,12 @@ importers:
       tailwindcss:
         specifier: ^3.4.15
         version: 3.4.19(tsx@4.22.3)(yaml@2.9.0)
+
+  packages/ai-provider:
+    dependencies:
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
 
   packages/audit-sdk:
     dependencies:

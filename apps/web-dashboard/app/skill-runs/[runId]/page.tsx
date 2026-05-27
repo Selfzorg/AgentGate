@@ -1,3 +1,4 @@
+import { AiInsightsEngine } from "@/components/ai/AiInsightsEngine";
 import { ExecutionConsole } from "@/components/execution/ExecutionConsole";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -14,7 +15,10 @@ export default async function SkillRunDetailPage({
         title={`Skill Run ${runId}`}
         description="Issue scoped execution tokens, queue governed execution, and stream persisted logs from the database."
       />
-      <ExecutionConsole runId={runId} />
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <ExecutionConsole runId={runId} />
+        <AiInsightsEngine runId={runId} />
+      </div>
     </div>
   );
 }

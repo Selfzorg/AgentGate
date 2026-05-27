@@ -111,6 +111,12 @@ enum LogLevel {
   error
 }
 
+enum AiRunAnalysisStatus {
+  completed
+  failed
+  disabled
+}
+
 model Tenant {
   id        String       @id
   name      String
@@ -135,6 +141,7 @@ model Tenant {
   auditEvents      AuditEvent[]
   auditArtifacts   AuditArtifact[]
   skillRunAttempts SkillRunAttempt[]
+  aiRunAnalyses    AiRunAnalysis[]
 
   @@map("tenants")
 }
@@ -164,6 +171,7 @@ model Workspace {
   auditEvents      AuditEvent[]
   auditArtifacts   AuditArtifact[]
   skillRunAttempts SkillRunAttempt[]
+  aiRunAnalyses    AiRunAnalysis[]
 
   @@unique([tenantId, key])
   @@index([tenantId])
@@ -368,6 +376,7 @@ model SkillRun {
   skillRunAttempts  SkillRunAttempt[]
   auditEvents       AuditEvent[]
   auditArtifacts    AuditArtifact[]
+  aiRunAnalysis     AiRunAnalysis?
 
   @@index([traceId])
   @@index([tenantId, createdAt])
@@ -483,6 +492,40 @@ model ExecutionLog {
   @@index([skillRunId, sequence])
   @@index([tenantId, workspaceId, createdAt])
   @@map("execution_logs")
+}
+
+model AiRunAnalysis {
+  id                 String              @id
+  tenantId           String              @map("tenant_id")
+  workspaceId        String              @map("workspace_id")
+  skillRunId         String              @unique @map("skill_run_id")
+  traceId            String              @map("trace_id")
+  summary            String
+  severity           String
+  riskNotes          Json                @default("[]") @map("risk_notes")
+  missingEvidence    Json                @default("[]") @map("missing_evidence")
+  suggestedActions   Json                @default("[]") @map("suggested_actions")
+  failureCause       String?             @map("failure_cause")
+  approverNotes      String?             @map("approver_notes")
+  model              String
+  provider           String?
+  inputTokens        Int                 @default(0) @map("input_tokens")
+  outputTokens       Int                 @default(0) @map("output_tokens")
+  totalTokens        Int                 @default(0) @map("total_tokens")
+  estimatedCostCents Int                 @default(0) @map("estimated_cost_cents")
+  status             AiRunAnalysisStatus @default(completed)
+  error              String?
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  skillRun  SkillRun  @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
+
+  @@index([traceId])
+  @@index([tenantId, workspaceId, createdAt])
+  @@index([status, createdAt])
+  @@map("ai_run_analyses")
 }
 
 model DryRunResult {

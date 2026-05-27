@@ -270,8 +270,32 @@ export type SkillRunDetailResponse = {
     }>;
     attempts: ExecutionAttemptRecord[];
     execution_logs: ExecutionLogRecord[];
+    ai_analysis: AiRunAnalysisRecord | null;
     audit_events: AuditEventRecord[];
   };
+};
+
+export type AiRunAnalysisRecord = {
+  id: string;
+  skill_run_id: string;
+  trace_id: string;
+  summary: string;
+  severity: "info" | "low" | "medium" | "high" | "critical" | string;
+  risk_notes: unknown;
+  missing_evidence: unknown;
+  suggested_actions: unknown;
+  failure_cause: string | null;
+  approver_notes: string | null;
+  model: string;
+  provider: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated_cost_cents: number;
+  status: "completed" | "failed" | "disabled" | string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type IssueExecutionTokenResponse = {
@@ -556,6 +580,30 @@ export async function getSkillRun(runId: string): Promise<SkillRunDetailResponse
   }
 
   return (await response.json()) as SkillRunDetailResponse;
+}
+
+export async function getRunAiAnalysis(runId: string): Promise<{ ai_analysis: AiRunAnalysisRecord }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs/${runId}/ai-analysis`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load AI analysis: ${response.status}`);
+  }
+
+  return (await response.json()) as { ai_analysis: AiRunAnalysisRecord };
+}
+
+export async function generateRunAiAnalysis(runId: string): Promise<{ ai_analysis: AiRunAnalysisRecord }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs/${runId}/ai-analysis`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as { ai_analysis: AiRunAnalysisRecord };
 }
 
 export async function issueExecutionToken(

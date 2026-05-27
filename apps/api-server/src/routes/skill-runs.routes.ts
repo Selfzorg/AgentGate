@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { serializeAnalysis } from "../services/ai-run-analysis-service";
 import { runDryRun } from "../services/dry-run-service";
 import { queueSkillRunExecution } from "../services/execution-service";
 
@@ -75,6 +76,7 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
           orderBy: { sequence: "asc" },
           take: 100
         },
+        aiRunAnalysis: true,
         auditEvents: {
           orderBy: { createdAt: "asc" }
         }
@@ -143,6 +145,7 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
           metadata: log.metadata,
           created_at: log.createdAt.toISOString()
         })),
+        ai_analysis: run.aiRunAnalysis ? serializeAnalysis(run.aiRunAnalysis) : null,
         audit_events: run.auditEvents.map((event) => ({
           id: event.id,
           event_type: event.eventType,
