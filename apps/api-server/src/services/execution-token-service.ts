@@ -80,7 +80,9 @@ export async function issueExecutionToken(prisma: PrismaClient, input: IssueExec
       return { status: 403 as const, body: { error: "Execution token rejected because run was denied" } };
     }
 
-    if (["execution_queued", "executing", "completed", "failed", "rolled_back"].includes(run.status)) {
+    const isRetryToken = run.status === "failed";
+
+    if (["execution_queued", "executing", "completed", "rolled_back"].includes(run.status)) {
       await emitCredentialRejected(tx, run, "Skill run is already finalized or executing");
       return { status: 409 as const, body: { error: "Execution token rejected because run is not token-eligible" } };
     }
@@ -102,7 +104,7 @@ export async function issueExecutionToken(prisma: PrismaClient, input: IssueExec
     if (existing) {
       await tx.skillRun.update({
         where: { id: run.id },
-        data: { status: "credential_issued" }
+        data: { status: isRetryToken ? "failed" : "credential_issued" }
       });
 
       return {
@@ -133,8 +135,26 @@ export async function issueExecutionToken(prisma: PrismaClient, input: IssueExec
 
     await tx.skillRun.update({
       where: { id: run.id },
-      data: { status: "credential_issued" }
+      data: { status: isRetryToken ? "failed" : "credential_issued" }
     });
+
+    if (isRetryToken) {
+      await emitAuditEvent(tx, {
+        tenantId: run.tenantId,
+        workspaceId: run.workspaceId,
+        skillRunId: run.id,
+        traceId: run.traceId,
+        eventType: "credential.reissued",
+        actorType: "system",
+        actorId: input.requestedBy ?? "system",
+        metadata: {
+          execution_token_id: token.id,
+          token_status: token.status,
+          scopes,
+          previous_status: "failed"
+        }
+      });
+    }
 
     await emitAuditEvent(tx, {
       tenantId: run.tenantId,

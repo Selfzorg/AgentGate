@@ -5,7 +5,7 @@ import { createApp } from "../apps/api-server/src/app";
 import { approveRequest } from "../apps/api-server/src/services/approval-service";
 import { createDecisionService, type DecisionServiceResult } from "../apps/api-server/src/services/decision-service";
 import { runDryRun } from "../apps/api-server/src/services/dry-run-service";
-import { processQueuedRunsOnce } from "../apps/runner-worker/src/runner-loop";
+import { processQueuedRunById } from "../apps/runner-worker/src/runner-loop";
 import { loadDemoFixtures } from "@agentgate/config-loader";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -316,8 +316,8 @@ describe("PR1 governance scenario harness", () => {
     });
     expectTraceContains(approvalRun, ["execution.queued"]);
 
-    const runner = await processQueuedRunsOnce({ prisma, limit: 100 });
-    expect(runner.claimed).toBeGreaterThanOrEqual(1);
+    const runner = await processQueuedRunById({ prisma, runId: approvalDecision.run_id });
+    expect(runner.claimed).toBe(1);
 
     approvalRun = await getRunRecord(approvalDecision.run_id);
     expect(approvalRun).toMatchObject({
@@ -447,7 +447,7 @@ describe("Phase 3 execution tokens and runner", () => {
       logs_url: `/api/v1/skill-runs/${decision.run_id}/logs`
     });
 
-    const runner = await processQueuedRunsOnce({ prisma });
+    const runner = await processQueuedRunById({ prisma, runId: decision.run_id });
     expect(runner.claimed).toBe(1);
 
     const run = await prisma.skillRun.findUniqueOrThrow({
@@ -595,7 +595,7 @@ describe("Phase 3 execution tokens and runner", () => {
     });
     expect(queued.statusCode).toBe(202);
 
-    await processQueuedRunsOnce({ prisma });
+    await processQueuedRunById({ prisma, runId: decision.run_id });
     const run = await prisma.skillRun.findUniqueOrThrow({
       where: { id: decision.run_id },
       include: {
@@ -635,7 +635,7 @@ describe("Phase 3 execution tokens and runner", () => {
     });
     expect(execute.statusCode).toBe(202);
 
-    await processQueuedRunsOnce({ prisma });
+    await processQueuedRunById({ prisma, runId: decision.run_id });
     await expect(prisma.skillRun.findUniqueOrThrow({ where: { id: decision.run_id } })).resolves.toMatchObject({
       status: "completed"
     });
@@ -657,7 +657,7 @@ describe("Phase 3 DB-backed execution log SSE", () => {
         idempotency_key: `phase3-sse-resume-${decision.run_id}`
       }
     });
-    await processQueuedRunsOnce({ prisma });
+    await processQueuedRunById({ prisma, runId: decision.run_id });
 
     const response = await app.inject({
       method: "GET",

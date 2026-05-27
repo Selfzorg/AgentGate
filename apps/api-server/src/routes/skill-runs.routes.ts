@@ -178,4 +178,18 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
 
     return reply.code(result.status).send(result.body);
   });
+
+  app.post("/skill-runs/:run_id/retry", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const body = executeBodySchema.parse(request.body);
+    const result = await queueSkillRunExecution(app.services.prisma, {
+      runId,
+      executionTokenId: body.execution_token_id,
+      idempotencyKey: body.idempotency_key,
+      requestedBy: "agentgate-ui",
+      allowRetry: true
+    });
+
+    return reply.code(result.status).send(result.body);
+  });
 };
