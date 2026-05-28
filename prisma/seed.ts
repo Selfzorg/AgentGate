@@ -129,7 +129,13 @@ async function main() {
         version: skill.version,
         config: {
           fixture: true,
-          supports_dry_run: Boolean(skill.supports_dry_run)
+          supports_dry_run: Boolean(skill.supports_dry_run),
+          skill_type: skill.skill_type ?? "execution",
+          side_effect_level:
+            skill.side_effect_level ?? (skill.live_requires_execution_token ? "mutating" : "simulated"),
+          check_key: skill.check_key ?? null,
+          allowed_runtimes: skill.allowed_runtimes ?? [],
+          preferred_runtimes: skill.preferred_runtimes ?? []
         },
         execution: {
           live_requires_execution_token: skill.live_requires_execution_token

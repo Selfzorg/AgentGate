@@ -21,6 +21,17 @@ const demoPolicyRuleSchema = z.object({
   approvers: z.array(z.string()).optional()
 });
 
+const evidenceRuntimeSchema = z.enum([
+  "codex_cli",
+  "claude_cli",
+  "claude_code_mcp",
+  "codex_mcp",
+  "internal_simulated_agent",
+  "native_connector",
+  "local_deterministic",
+  "agent"
+]);
+
 export const demoAgentsConfigSchema = z.object({
   tenant: z.object({
     id: z.string(),
@@ -71,7 +82,12 @@ export const demoSkillsConfigSchema = z.object({
       connector_id: z.string(),
       version: z.string(),
       live_requires_execution_token: z.boolean(),
-      supports_dry_run: z.boolean().optional()
+      supports_dry_run: z.boolean().optional(),
+      skill_type: z.enum(["execution", "evidence"]).optional(),
+      side_effect_level: z.enum(["read_only", "simulated", "mutating"]).optional(),
+      check_key: z.string().optional(),
+      allowed_runtimes: z.array(evidenceRuntimeSchema).optional(),
+      preferred_runtimes: z.array(evidenceRuntimeSchema).optional()
     })
   )
 });

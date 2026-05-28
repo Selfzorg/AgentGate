@@ -6,52 +6,13 @@ import { evaluatePolicy } from "@agentgate/policy-engine";
 import { scoreRisk } from "@agentgate/risk-engine";
 import { resolveSkill } from "@agentgate/skill-resolver";
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { z } from "zod";
+import { normalizeActionRequest, prismaAgentSource } from "./action-request-schema";
 import { createOrUpdateApprovalRequest } from "./approval-service";
+import { collectEvidenceForRun } from "./evidence-collection-service";
 import { createGateCheckResults } from "./gate-check-service";
 import { createId } from "./id";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-
-const normalizedActionRequestSchema = z.object({
-  tenant_id: z.string().min(1),
-  workspace_id: z.string().min(1),
-  source: z.enum(["codex", "claude-code", "claude_code", "mcp_proxy", "demo_harness"]),
-  adapter_type: z.enum(["hook", "mcp_proxy", "simulator"]),
-  agent: z.object({
-    agent_id: z.string().min(1),
-    agent_type: z.string().min(1),
-    role: z.string().min(1),
-    owner: z.string().optional()
-  }),
-  tool: z.object({
-    tool_name: z.string().min(1),
-    tool_call_id: z.string().optional()
-  }),
-  raw_action: z.string().min(1),
-  context: z
-    .object({
-      repo: z.string().optional(),
-      branch: z.string().optional(),
-      cwd: z.string().optional(),
-      environment: z.enum(["dev", "staging", "production"]).optional(),
-      service: z.string().optional(),
-      database: z.string().optional(),
-      target_branch: z.string().optional(),
-      ci_status: z.enum(["passed", "failed", "unknown"]).optional(),
-      tests_status: z.enum(["passed", "failed", "unknown"]).optional(),
-      security_scan: z.enum(["passed", "failed", "unknown"]).optional(),
-      rollback_plan: z.enum(["exists", "missing", "unknown"]).optional(),
-      staging_deploy: z.enum(["success", "failed", "unknown"]).optional(),
-      dry_run_completed: z.boolean().optional(),
-      schema_diff_generated: z.boolean().optional(),
-      backup_exists: z.boolean().optional(),
-      required_reviews_passed: z.boolean().optional(),
-      branch_protection_satisfied: z.boolean().optional()
-    })
-    .default({}),
-  requested_at: z.string().optional()
-});
 
 export type DecisionServiceResult = {
   decision: "ALLOW" | "DENY" | "REQUIRE_APPROVAL" | "FORCE_DRY_RUN";
@@ -81,7 +42,7 @@ export function createDecisionService({
 }): DecisionService {
   return {
     async evaluate(rawRequest) {
-      const request = normalizeRequest(normalizedActionRequestSchema.parse(rawRequest));
+      const request = normalizeActionRequest(rawRequest);
       const fixtures = await loadDemoFixtures(configDir);
       const traceId = createId("trc");
       const runId = createId("run");
@@ -138,7 +99,8 @@ export function createDecisionService({
           : Promise.resolve(null)
       ]);
 
-      const missingChecks = missingChecksForRequest(policy.required_checks, request.context);
+      const shouldCollectEvidence = policy.decision === "REQUIRE_APPROVAL" && policy.required_checks.length > 0;
+      const missingChecks = shouldCollectEvidence ? policy.required_checks : missingChecksForRequest(policy.required_checks, request.context);
       const status = statusForDecision(policy.decision);
 
       await prisma.$transaction(async (tx) => {
@@ -186,7 +148,8 @@ export function createDecisionService({
             skillRunId: runId,
             skillId: resolvedSkill.skill_id,
             requiredChecks: policy.required_checks,
-            context: request.context
+            context: request.context,
+            mode: shouldCollectEvidence ? "pending" : "context"
           });
         }
 
@@ -199,6 +162,7 @@ export function createDecisionService({
             riskLevel: risk.risk_level,
             missingChecks,
             requiredApprovers: policy.approvers,
+            approvalReadiness: shouldCollectEvidence ? "collecting" : undefined,
             evidence: {
               policy: policy.matched_policy?.policy_id ?? null,
               reason: policy.reason,
@@ -261,6 +225,18 @@ export function createDecisionService({
         });
       });
 
+      let finalMissingChecks = missingChecks;
+      if (shouldCollectEvidence) {
+        const evidenceCollection = await collectEvidenceForRun({
+          prisma,
+          runId,
+          requestedBy: "decision-service"
+        });
+        if (evidenceCollection.status === 202) {
+          finalMissingChecks = evidenceCollection.body.missing_checks;
+        }
+      }
+
       return {
         decision: policy.decision,
         skill_id: resolvedSkill.skill_id,
@@ -273,23 +249,10 @@ export function createDecisionService({
         run_id: runId,
         mode: "enforce",
         ...(policy.decision === "FORCE_DRY_RUN" ? { dry_run_required: true } : {}),
-        ...(missingChecks.length > 0 ? { missing_checks: missingChecks } : {})
+        ...(finalMissingChecks.length > 0 ? { missing_checks: finalMissingChecks } : {})
       };
     }
   };
-}
-
-function normalizeRequest(
-  request: z.infer<typeof normalizedActionRequestSchema>
-): NormalizedActionRequest {
-  return {
-    ...request,
-    source: request.source === "claude_code" ? "claude-code" : request.source
-  } as NormalizedActionRequest;
-}
-
-function prismaAgentSource(source: NormalizedActionRequest["source"]) {
-  return source === "claude-code" ? "claude_code" : source;
 }
 
 function statusForDecision(decision: DecisionServiceResult["decision"]) {

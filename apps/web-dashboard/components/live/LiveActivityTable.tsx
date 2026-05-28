@@ -5,22 +5,9 @@ import { useEffect, useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { getLiveActivity, runSkillRunDryRun, type LiveActivity } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 
-const columns = ["Time", "Agent", "Role", "Source", "Raw Action", "Skill", "Environment", "Risk", "Decision", "Trace"];
-
-const decisionTone: Record<string, string> = {
-  ALLOW: "bg-success/10 text-success",
-  DENY: "bg-danger/10 text-danger",
-  REQUIRE_APPROVAL: "bg-warning/10 text-warning",
-  FORCE_DRY_RUN: "bg-accent/10 text-accent"
-};
-
-const riskTone: Record<string, string> = {
-  low: "text-success",
-  medium: "text-accent",
-  high: "text-warning",
-  critical: "text-danger"
-};
+const columns = ["Time", "Agent", "Action", "Skill", "Environment", "Status", "Risk", "Decision", "Run", "Audit"];
 
 export function LiveActivityTable() {
   const [activities, setActivities] = useState<LiveActivity[]>([]);
@@ -39,7 +26,7 @@ export function LiveActivityTable() {
         }
       } catch {
         if (!cancelled) {
-          setStatus("API unavailable. Start the Phase 1 dev server.");
+          setStatus("API unavailable. Start the Phase 3 dev server.");
         }
       }
     }
@@ -71,10 +58,12 @@ export function LiveActivityTable() {
     <section className="min-w-0 overflow-hidden rounded-ui border border-border bg-surface shadow-panel">
       <div className="border-b border-border p-5">
         <h2 className="text-base font-semibold">Activity Stream</h2>
-        <p className="mt-1 text-sm text-muted">{status}</p>
+        <p className="mt-1 text-sm text-muted">
+          {status} Open a run for token, logs, and AI Insights; open audit for lifecycle completeness.
+        </p>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[760px] w-full border-collapse text-left text-sm">
+        <table className="min-w-[900px] w-full border-collapse text-left text-sm">
           <thead className="bg-background text-xs uppercase text-muted">
             <tr>
               {columns.map((column) => (
@@ -101,20 +90,22 @@ export function LiveActivityTable() {
                       second: "2-digit"
                     })}
                   </td>
-                  <td className="px-4 py-3">{activity.agent_display_name ?? activity.agent_id ?? "Unknown"}</td>
-                  <td className="px-4 py-3 text-muted">{activity.role ?? "unknown"}</td>
-                  <td className="px-4 py-3 text-muted">{activity.source}</td>
-                  <td className="max-w-[220px] truncate px-4 py-3 font-mono text-xs">{activity.raw_action}</td>
+                  <td className="px-4 py-3">
+                    <div>{activity.agent_display_name ?? activity.agent_id ?? "Unknown"}</div>
+                    <div className="text-xs text-muted">{activity.role ?? "unknown"} · {activity.source}</div>
+                  </td>
+                  <td className="max-w-[240px] truncate px-4 py-3 font-mono text-xs">{activity.raw_action}</td>
                   <td className="px-4 py-3">{activity.skill_id ?? "unresolved"}</td>
                   <td className="px-4 py-3 text-muted">{activity.environment ?? "n/a"}</td>
-                  <td className={`px-4 py-3 font-medium ${activity.risk_level ? riskTone[activity.risk_level] : ""}`}>
-                    {activity.risk_level ?? "n/a"}
+                  <td className="px-4 py-3">
+                    <StatusBadge kind="run" value={activity.status} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge kind="risk" value={activity.risk_level} />
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-col items-start gap-2">
-                      <span className={`rounded-ui px-2 py-1 text-xs font-semibold ${decisionTone[activity.decision ?? ""] ?? "bg-background text-muted"}`}>
-                        {activity.decision ?? "n/a"}
-                      </span>
+                      <StatusBadge kind="decision" value={activity.decision} />
                       {activity.decision === "FORCE_DRY_RUN" ? (
                         <Button
                           className="h-8 px-2 text-xs"
@@ -127,6 +118,11 @@ export function LiveActivityTable() {
                         </Button>
                       ) : null}
                     </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Link className="font-mono text-xs text-accent" href={`/skill-runs/${activity.run_id}`}>
+                      {activity.run_id}
+                    </Link>
                   </td>
                   <td className="px-4 py-3">
                     <Link className="font-mono text-xs text-accent" href={`/audit/${activity.trace_id}`}>

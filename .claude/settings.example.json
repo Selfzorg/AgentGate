@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".agentgate/hooks/claude-sessionstart-evidence-worker.mjs"],
+            "statusMessage": "Starting AgentGate evidence worker"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .agentgate/hooks/claude-pretooluse.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}

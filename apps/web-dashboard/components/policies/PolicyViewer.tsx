@@ -2,13 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getPolicies, type PolicyRecord } from "@/lib/api-client";
-
-const decisionTone: Record<PolicyRecord["decision"], string> = {
-  ALLOW: "text-success",
-  DENY: "text-danger",
-  REQUIRE_APPROVAL: "text-warning",
-  FORCE_DRY_RUN: "text-accent"
-};
+import { StatusBadge } from "@/components/ui/status-badge";
 
 function listValue(value: unknown): string {
   if (Array.isArray(value)) return value.join(", ") || "none";
@@ -45,7 +39,7 @@ export function PolicyViewer() {
                 <p className="mt-1 font-mono text-xs text-muted">{policy.policy_id}</p>
               </div>
               <div className="lg:text-right">
-                <div className={`text-sm font-semibold ${decisionTone[policy.decision]}`}>{policy.decision}</div>
+                <StatusBadge kind="decision" value={policy.decision} />
                 <div className="font-mono text-xs text-muted">priority {policy.priority}</div>
               </div>
               <div className="text-sm leading-6 text-muted">
@@ -58,6 +52,11 @@ export function PolicyViewer() {
               </div>
             </article>
           ))}
+        {policies.length === 0 ? (
+          <div className="p-5 text-sm text-muted">
+            No policies loaded yet. Run migration and seed before the demo.
+          </div>
+        ) : null}
       </div>
     </section>
   );

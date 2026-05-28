@@ -9,17 +9,12 @@ import {
   type DemoActionCard
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
-
-const decisionTone: Record<DemoActionCard["expected_decision"], string> = {
-  ALLOW: "text-success",
-  DENY: "text-danger",
-  REQUIRE_APPROVAL: "text-warning",
-  FORCE_DRY_RUN: "text-accent"
-};
+import { StatusBadge } from "@/components/ui/status-badge";
 
 export function DemoActionLauncher() {
   const [actions, setActions] = useState<DemoActionCard[]>([]);
   const [status, setStatus] = useState("Loading fixture-backed demo actions...");
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [lastDecision, setLastDecision] = useState<DecisionResponse | null>(null);
 
@@ -28,9 +23,11 @@ export function DemoActionLauncher() {
       .then((response) => {
         setActions(response.actions);
         setStatus("Fixture actions loaded from API.");
+        setLoadState("ready");
       })
       .catch(() => {
         setStatus("API unavailable. Start pnpm dev after migration and seed complete.");
+        setLoadState("error");
       });
   }, []);
 
@@ -62,10 +59,8 @@ export function DemoActionLauncher() {
               <div>
                 <h3 className="text-sm font-medium">{action.label}</h3>
                 <p className="mt-1 text-xs leading-5 text-muted">{action.description}</p>
-              </div>
-              <span className={`text-xs font-semibold ${decisionTone[action.expected_decision]}`}>
-                {action.expected_decision}
-              </span>
+          </div>
+              <StatusBadge kind="decision" value={action.expected_decision} />
             </div>
             <Button
               className="mt-3 w-full"
@@ -78,12 +73,20 @@ export function DemoActionLauncher() {
             </Button>
           </article>
         ))}
+        {loadState === "loading" ? (
+          <div className="rounded-ui border border-dashed border-border p-3 text-sm text-muted">
+            Loading PRD-style demo fixtures from the API...
+          </div>
+        ) : null}
+        {loadState === "ready" && actions.length === 0 ? (
+          <div className="rounded-ui border border-dashed border-border p-3 text-sm text-muted">
+            No demo actions were returned. Rerun seed and refresh.
+          </div>
+        ) : null}
       </div>
       {lastDecision ? (
         <div className="mt-4 rounded-ui border border-border bg-background p-3 text-xs leading-5">
-          <div className={`font-semibold ${decisionTone[lastDecision.decision]}`}>
-            {lastDecision.decision}
-          </div>
+          <StatusBadge kind="decision" value={lastDecision.decision} />
           <div className="mt-1 text-muted">{lastDecision.reason}</div>
           <div className="mt-2 font-mono text-[11px] text-muted">
             run {lastDecision.run_id} · trace {lastDecision.trace_id}

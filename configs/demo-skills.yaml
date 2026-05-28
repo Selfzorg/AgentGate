@@ -77,3 +77,130 @@ skills:
     connector_id: connector_deployment_demo
     version: "0.0.0"
     live_requires_execution_token: true
+  - id: skill_verify_ci_status
+    skill_id: verify-ci-status
+    name: Verify CI Status
+    category: evidence
+    default_risk_level: low
+    connector_id: connector_github_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+    skill_type: evidence
+    side_effect_level: read_only
+    check_key: ci_passed
+    allowed_runtimes: &evidence_allowed_runtimes
+      - codex_cli
+      - claude_cli
+      - claude_code_mcp
+      - codex_mcp
+      - native_connector
+      - local_deterministic
+    preferred_runtimes: &evidence_preferred_runtimes
+      - codex_cli
+      - claude_code_mcp
+      - local_deterministic
+      - native_connector
+  - id: skill_verify_tests_passed
+    skill_id: verify-tests-passed
+    name: Verify Tests Passed
+    category: evidence
+    default_risk_level: low
+    connector_id: connector_github_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+    skill_type: evidence
+    side_effect_level: read_only
+    check_key: tests_passed
+    allowed_runtimes: *evidence_allowed_runtimes
+    preferred_runtimes: *evidence_preferred_runtimes
+  - id: skill_verify_rollback_plan
+    skill_id: verify-rollback-plan
+    name: Verify Rollback Plan
+    category: evidence
+    default_risk_level: low
+    connector_id: connector_deployment_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+    skill_type: evidence
+    side_effect_level: read_only
+    check_key: rollback_plan_exists
+    allowed_runtimes: *evidence_allowed_runtimes
+    preferred_runtimes: *evidence_preferred_runtimes
+  - id: skill_verify_staging_deploy
+    skill_id: verify-staging-deploy
+    name: Verify Staging Deploy
+    category: evidence
+    default_risk_level: low
+    connector_id: connector_deployment_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+    skill_type: evidence
+    side_effect_level: read_only
+    check_key: staging_deploy_successful
+    allowed_runtimes: *evidence_allowed_runtimes
+    preferred_runtimes: *evidence_preferred_runtimes
+  - id: skill_verify_required_reviews
+    skill_id: verify-required-reviews
+    name: Verify Required Reviews
+    category: evidence
+    default_risk_level: low
+    connector_id: connector_github_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+    skill_type: evidence
+    side_effect_level: read_only
+    check_key: required_reviews_passed
+    allowed_runtimes: *evidence_allowed_runtimes
+    preferred_runtimes: *evidence_preferred_runtimes
+  - id: skill_verify_branch_protection
+    skill_id: verify-branch-protection
+    name: Verify Branch Protection
+    category: evidence
+    default_risk_level: low
+    connector_id: connector_github_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+    skill_type: evidence
+    side_effect_level: read_only
+    check_key: branch_protection_satisfied
+    allowed_runtimes: *evidence_allowed_runtimes
+    preferred_runtimes: *evidence_preferred_runtimes
+  - id: skill_verify_dry_run_completed
+    skill_id: verify-dry-run-completed
+    name: Verify Dry-Run Completed
+    category: evidence
+    default_risk_level: low
+    connector_id: connector_db_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+    skill_type: evidence
+    side_effect_level: read_only
+    check_key: dry_run_completed
+    allowed_runtimes: *evidence_allowed_runtimes
+    preferred_runtimes: *evidence_preferred_runtimes
+  - id: skill_verify_schema_diff
+    skill_id: verify-schema-diff
+    name: Verify Schema Diff
+    category: evidence
+    default_risk_level: low
+    connector_id: connector_db_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+    skill_type: evidence
+    side_effect_level: read_only
+    check_key: schema_diff_generated
+    allowed_runtimes: *evidence_allowed_runtimes
+    preferred_runtimes: *evidence_preferred_runtimes
+  - id: skill_verify_database_backup
+    skill_id: verify-database-backup
+    name: Verify Database Backup
+    category: evidence
+    default_risk_level: low
+    connector_id: connector_db_demo
+    version: "1.0.0"
+    live_requires_execution_token: false
+    skill_type: evidence
+    side_effect_level: read_only
+    check_key: backup_exists
+    allowed_runtimes: *evidence_allowed_runtimes
+    preferred_runtimes: *evidence_preferred_runtimes

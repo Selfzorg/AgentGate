@@ -13,6 +13,7 @@
   "dependencies": {
     "@agentgate/config-loader": "workspace:*",
     "@agentgate/core-types": "workspace:*",
+    "@agentgate/ai-provider": "workspace:*",
     "@agentgate/policy-engine": "workspace:*",
     "@agentgate/risk-engine": "workspace:*",
     "@agentgate/runner-worker": "workspace:*",

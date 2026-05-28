@@ -11,6 +11,10 @@ export const dbDemoConnector: SkillConnector = {
     };
   },
   async execute(_input: SkillInput, _context: ExecutionContext): Promise<ExecutionResult> {
-    return { status: "completed", summary: "Database demo execution placeholder." };
+    return {
+      status: "completed",
+      summary: "Database migration simulation completed successfully.",
+      metadata: { applied_migrations: 2, indexes_created: 1 }
+    };
   }
 };

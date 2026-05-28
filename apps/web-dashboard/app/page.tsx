@@ -6,18 +6,18 @@ import { Button } from "@/components/ui/button";
 
 const foundationItems = [
   {
-    title: "Schema baseline",
-    description: "Complete Prisma ownership graph, relations, indexes, and uniqueness rules are ready for migration.",
+    title: "Governance records",
+    description: "Skill runs, approvals, gate checks, tokens, attempts, logs, and audit events share the same Postgres source of truth.",
     icon: Database
   },
   {
     title: "Single runtime",
-    description: "Fastify imports the runner loop for the single-process MVP model.",
+    description: "Fastify imports the runner loop so queued execution advances without Redis or a separate worker process.",
     icon: Workflow
   },
   {
-    title: "Governance shell",
-    description: "Dashboard routes are present but product behavior starts in later phases.",
+    title: "Execution console",
+    description: "Approved risky actions can issue scoped tokens, execute once, and stream persisted logs.",
     icon: ShieldCheck
   }
 ];
@@ -26,8 +26,8 @@ export default function OverviewPage() {
   return (
     <div>
       <PageHeader
-        title="AgentGate Phase 2"
-        description="Evidence-backed approvals and dry-runs are live on top of the observe-and-decide governance path."
+        title="AgentGate Phase 3"
+        description="Governed execution now connects approvals to scoped tokens, the runner, persisted logs, and complete audit traces."
       />
       <div className="mb-7 flex flex-wrap gap-3">
         <Button asChild>
@@ -38,6 +38,9 @@ export default function OverviewPage() {
         </Button>
         <Button asChild variant="secondary">
           <Link href="/policies">View Policy Fixtures</Link>
+        </Button>
+        <Button asChild variant="secondary">
+          <Link href="/system-guide">Open System Guide</Link>
         </Button>
       </div>
       <div className="grid gap-4 md:grid-cols-3">

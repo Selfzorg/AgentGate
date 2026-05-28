@@ -9,3 +9,5 @@ coverage/
 *.tsbuildinfo
 tmp/
 .postgres/
+.agentgate/logs/
+.agentgate/run/

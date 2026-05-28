@@ -5,6 +5,6 @@ export type ApprovalRequestSummary = {
   skill_run_id: string;
   status: ApprovalStatus;
   risk_level: RiskLevel;
-  approval_readiness: "ready" | "blocked";
+  approval_readiness: "ready" | "blocked" | "collecting";
   missing_checks: string[];
 };

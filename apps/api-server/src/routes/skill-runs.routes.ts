@@ -1,9 +1,16 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { serializeAnalysis } from "../services/ai-run-analysis-service";
 import { runDryRun } from "../services/dry-run-service";
+import { queueSkillRunExecution } from "../services/execution-service";
 
 const runParamsSchema = z.object({
   run_id: z.string()
+});
+
+const executeBodySchema = z.object({
+  execution_token_id: z.string().optional(),
+  idempotency_key: z.string().min(1)
 });
 
 export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
@@ -59,6 +66,20 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
         gateCheckResults: {
           orderBy: { checkKey: "asc" }
         },
+        executionTokens: {
+          orderBy: { createdAt: "desc" }
+        },
+        skillRunAttempts: {
+          orderBy: { createdAt: "desc" }
+        },
+        evidenceTasks: {
+          orderBy: [{ createdAt: "desc" }]
+        },
+        executionLogs: {
+          orderBy: { sequence: "asc" },
+          take: 100
+        },
+        aiRunAnalysis: true,
         auditEvents: {
           orderBy: { createdAt: "asc" }
         }
@@ -97,6 +118,48 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
           status: check.status,
           evidence: check.evidence
         })),
+        evidence_tasks: run.evidenceTasks.map((task) => ({
+          id: task.id,
+          check_key: task.checkKey,
+          status: task.status,
+          runtime: task.runtime,
+          attempt: task.attempt,
+          claimed_by_agent_id: task.claimedByAgentId,
+          lease_expires_at: task.leaseExpiresAt?.toISOString() ?? null,
+          completed_at: task.completedAt?.toISOString() ?? null,
+          created_at: task.createdAt.toISOString()
+        })),
+        execution_tokens: run.executionTokens.map((token) => ({
+          id: token.id,
+          status: token.status,
+          scopes: token.scopes,
+          environment: token.environment,
+          approval_request_id: token.approvalRequestId,
+          expires_at: token.expiresAt.toISOString(),
+          used_at: token.usedAt?.toISOString() ?? null,
+          revoked_at: token.revokedAt?.toISOString() ?? null,
+          created_at: token.createdAt.toISOString()
+        })),
+        attempts: run.skillRunAttempts.map((attempt) => ({
+          id: attempt.id,
+          execution_token_id: attempt.executionTokenId,
+          idempotency_key: attempt.idempotencyKey,
+          status: attempt.status,
+          result: attempt.result,
+          error: attempt.error,
+          started_at: attempt.startedAt?.toISOString() ?? null,
+          completed_at: attempt.completedAt?.toISOString() ?? null,
+          created_at: attempt.createdAt.toISOString()
+        })),
+        execution_logs: run.executionLogs.map((log) => ({
+          id: log.id,
+          sequence: log.sequence,
+          level: log.level,
+          message: log.message,
+          metadata: log.metadata,
+          created_at: log.createdAt.toISOString()
+        })),
+        ai_analysis: run.aiRunAnalysis ? serializeAnalysis(run.aiRunAnalysis) : null,
         audit_events: run.auditEvents.map((event) => ({
           id: event.id,
           event_type: event.eventType,
@@ -122,30 +185,28 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/skill-runs/:run_id/execute", async (request, reply) => {
     const { run_id: runId } = runParamsSchema.parse(request.params);
-    const run = await app.services.prisma.skillRun.findUnique({
-      where: { id: runId },
-      include: { approvalRequest: true }
+    const body = executeBodySchema.parse(request.body);
+    const result = await queueSkillRunExecution(app.services.prisma, {
+      runId,
+      executionTokenId: body.execution_token_id,
+      idempotencyKey: body.idempotency_key,
+      requestedBy: "agentgate-ui"
     });
 
-    if (!run) {
-      return reply.code(404).send({ error: "Skill run not found" });
-    }
+    return reply.code(result.status).send(result.body);
+  });
 
-    if (run.status === "denied" || run.approvalRequest?.status === "denied") {
-      return reply.code(403).send({
-        error: "Execution rejected because approval was denied"
-      });
-    }
+  app.post("/skill-runs/:run_id/retry", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const body = executeBodySchema.parse(request.body);
+    const result = await queueSkillRunExecution(app.services.prisma, {
+      runId,
+      executionTokenId: body.execution_token_id,
+      idempotencyKey: body.idempotency_key,
+      requestedBy: "agentgate-ui",
+      allowRetry: true
+    });
 
-    if (
-      (run.riskLevel === "high" || run.riskLevel === "critical") &&
-      run.approvalRequest?.status !== "approved"
-    ) {
-      return reply.code(403).send({
-        error: "Execution rejected because approval is required"
-      });
-    }
-
-    return reply.code(501).send({ error: "Phase 3 placeholder" });
+    return reply.code(result.status).send(result.body);
   });
 };

@@ -1,10 +1,23 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { approveRequest, denyRequest, getApprovalQueue } from "../services/approval-service";
+import { collectEvidenceForRun } from "../services/evidence-collection-service";
 import { runDryRun } from "../services/dry-run-service";
 
 const approvalParamsSchema = z.object({
   approval_id: z.string()
+});
+
+const approvalQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).default(0),
+  status: z.enum(["pending", "approved", "denied", "expired"]).optional(),
+  q: z.string().trim().max(200).optional()
+});
+
+const evidenceRetryParamsSchema = z.object({
+  approval_id: z.string(),
+  check_key: z.string()
 });
 
 const actionBodySchema = z
@@ -15,9 +28,10 @@ const actionBodySchema = z
   .default({});
 
 export const registerApprovalsRoutes: FastifyPluginAsync = async (app) => {
-  app.get("/approvals", async () => ({
-    approvals: await getApprovalQueue(app.services.prisma)
-  }));
+  app.get("/approvals", async (request) => {
+    const query = approvalQuerySchema.parse(request.query);
+    return getApprovalQueue(app.services.prisma, query);
+  });
 
   app.post("/approvals/:approval_id/approve", async (request, reply) => {
     const params = approvalParamsSchema.parse(request.params);
@@ -60,6 +74,45 @@ export const registerApprovalsRoutes: FastifyPluginAsync = async (app) => {
     const result = await runDryRun({
       prisma: app.services.prisma,
       runId: approval.skillRunId,
+      requestedBy: "user_service_owner"
+    });
+
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/approvals/:approval_id/evidence/retry", async (request, reply) => {
+    const params = approvalParamsSchema.parse(request.params);
+    const approval = await app.services.prisma.approvalRequest.findUnique({
+      where: { id: params.approval_id }
+    });
+
+    if (!approval) {
+      return reply.code(404).send({ error: "Approval request not found" });
+    }
+
+    const result = await collectEvidenceForRun({
+      prisma: app.services.prisma,
+      runId: approval.skillRunId,
+      requestedBy: "user_service_owner"
+    });
+
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/approvals/:approval_id/evidence/:check_key/retry", async (request, reply) => {
+    const params = evidenceRetryParamsSchema.parse(request.params);
+    const approval = await app.services.prisma.approvalRequest.findUnique({
+      where: { id: params.approval_id }
+    });
+
+    if (!approval) {
+      return reply.code(404).send({ error: "Approval request not found" });
+    }
+
+    const result = await collectEvidenceForRun({
+      prisma: app.services.prisma,
+      runId: approval.skillRunId,
+      checkKeys: [params.check_key],
       requestedBy: "user_service_owner"
     });
 

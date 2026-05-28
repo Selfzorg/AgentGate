@@ -10,7 +10,16 @@ export type GateCheckInput = {
   context: Record<string, unknown>;
 };
 
-type GateCheckStatus = "passed" | "failed" | "missing" | "unknown";
+type GateCheckStatus = "pending" | "running" | "passed" | "failed" | "missing" | "unknown";
+
+export type GateCheckPreview = {
+  check_key: string;
+  label: string;
+  status: GateCheckStatus;
+  evidence: Record<string, unknown>;
+};
+
+type GateCheckCreationMode = "context" | "pending";
 
 const labels: Record<string, string> = {
   ci_passed: "CI passed",
@@ -26,7 +35,7 @@ const labels: Record<string, string> = {
 
 export async function createGateCheckResults(
   prisma: PrismaClient | Prisma.TransactionClient,
-  input: GateCheckInput
+  input: GateCheckInput & { mode?: GateCheckCreationMode }
 ) {
   await prisma.gateCheckResult.deleteMany({
     where: {
@@ -34,25 +43,50 @@ export async function createGateCheckResults(
     }
   });
 
-  const results = input.requiredChecks.map((checkKey) => {
-    const status = statusForCheck(checkKey, input.context);
-    return {
+  const results = previewGateChecks({
+    skillId: input.skillId,
+    requiredChecks: input.requiredChecks,
+    context: input.context,
+    mode: input.mode ?? "context"
+  }).map((check) => ({
       id: createId("gcr"),
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
       skillRunId: input.skillRunId,
-      checkKey,
-      label: labels[checkKey] ?? checkKey,
-      status,
-      evidence: evidenceForCheck(checkKey, status, input.context, input.skillId) as Prisma.InputJsonValue
-    };
-  });
+      checkKey: check.check_key,
+      label: check.label,
+      status: check.status,
+      evidence: check.evidence as Prisma.InputJsonValue
+    }));
 
   if (results.length > 0) {
     await prisma.gateCheckResult.createMany({ data: results });
   }
 
   return results;
+}
+
+export function previewGateChecks({
+  skillId,
+  requiredChecks,
+  context,
+  mode = "context"
+}: {
+  skillId: string;
+  requiredChecks: string[];
+  context: Record<string, unknown>;
+  mode?: GateCheckCreationMode;
+}): GateCheckPreview[] {
+  return requiredChecks.map((checkKey) => {
+    const status = mode === "pending" ? "pending" : statusForCheck(checkKey, context);
+
+    return {
+      check_key: checkKey,
+      label: labels[checkKey] ?? checkKey,
+      status,
+      evidence: evidenceForCheck(checkKey, status, context, skillId)
+    };
+  });
 }
 
 export async function getMissingChecks(
@@ -102,6 +136,16 @@ function evidenceForCheck(
   context: Record<string, unknown>,
   skillId: string
 ) {
+  if (status === "pending" || status === "running") {
+    return {
+      source: "evidence_pipeline",
+      skill_id: skillId,
+      context_key: checkKey,
+      status,
+      reason: "Evidence collection has been queued."
+    };
+  }
+
   return {
     source: "demo_context",
     skill_id: skillId,

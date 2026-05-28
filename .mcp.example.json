@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "agentgate": {
+      "command": "pnpm",
+      "args": ["mcp:start"],
+      "env": {
+        "AGENTGATE_API_BASE_URL": "http://localhost:4000",
+        "AGENTGATE_TENANT_ID": "tenant_demo",
+        "AGENTGATE_WORKSPACE_ID": "workspace_demo"
+      }
+    }
+  }
+}
