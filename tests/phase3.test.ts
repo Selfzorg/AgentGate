@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createApp } from "../apps/api-server/src/app";
 import { approveRequest } from "../apps/api-server/src/services/approval-service";
 import { createDecisionService, type DecisionServiceResult } from "../apps/api-server/src/services/decision-service";
+import { processEvidenceTasksOnce } from "../apps/api-server/src/services/evidence-task-service";
 import { runDryRun } from "../apps/api-server/src/services/dry-run-service";
 import { processQueuedRunById } from "../apps/runner-worker/src/runner-loop";
 import { loadDemoFixtures } from "@agentgate/config-loader";
@@ -31,7 +32,12 @@ async function replay(actionId: string) {
   return createDecisionService({ prisma, configDir }).evaluate(action?.payload);
 }
 
+async function processEvidenceForRun(runId: string, agentId: string) {
+  await processEvidenceTasksOnce({ prisma, skillRunId: runId, limit: 50, agentId });
+}
+
 async function approveDecision(decision: DecisionServiceResult, comment = "Phase 3 approval evidence reviewed.") {
+  await processEvidenceForRun(decision.run_id, "phase3_evidence_worker");
   const approval = await prisma.approvalRequest.findUniqueOrThrow({
     where: { skillRunId: decision.run_id }
   });
@@ -194,15 +200,15 @@ describe("PR1 governance scenario harness", () => {
     let approvalRun = await getRunRecord(approvalDecision.run_id);
     expect(approvalRun).toMatchObject({
       decision: "REQUIRE_APPROVAL",
-      status: "approval_required"
+      status: "approval_pending"
     });
     expect(approvalRun.matchedPolicy?.policyId).toBe("production_deploy_requires_approval");
     expect(approvalRun.approvalRequest).toMatchObject({
       status: "pending",
-      approvalReadiness: "ready"
+      approvalReadiness: "collecting"
     });
     expect(approvalRun.gateCheckResults).toHaveLength(4);
-    expect(approvalRun.gateCheckResults.every((check) => check.status === "passed")).toBe(true);
+    expect(approvalRun.gateCheckResults.every((check) => check.status === "running")).toBe(true);
     expect(approvalRun.dryRunResult).toBeNull();
     expectTraceContains(approvalRun, [
       "skill.invocation.received",
@@ -212,6 +218,16 @@ describe("PR1 governance scenario harness", () => {
       "prerequisites.checked",
       "approval.requested"
     ]);
+
+    await processEvidenceForRun(approvalDecision.run_id, "phase3_harness_evidence_worker");
+    approvalRun = await getRunRecord(approvalDecision.run_id);
+    expect(approvalRun).toMatchObject({
+      status: "approval_required"
+    });
+    expect(approvalRun.approvalRequest).toMatchObject({
+      approvalReadiness: "ready"
+    });
+    expect(approvalRun.gateCheckResults.every((check) => check.status === "passed")).toBe(true);
 
     let dryRunRun = await getRunRecord(dryRunDecision.run_id);
     expect(dryRunRun).toMatchObject({

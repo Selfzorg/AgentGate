@@ -23,7 +23,7 @@ enum RiskLevel {
 
 enum AgentSource {
   codex
-  claude_code @map("claude-code")
+  claude_code  @map("claude-code")
   mcp_proxy
   demo_harness
 }
@@ -80,6 +80,8 @@ enum ExecutionTokenStatus {
 }
 
 enum GateCheckStatus {
+  pending
+  running
   passed
   failed
   missing
@@ -117,6 +119,24 @@ enum AiRunAnalysisStatus {
   disabled
 }
 
+enum EvidenceTaskStatus {
+  queued
+  claimed
+  running
+  succeeded
+  failed
+  timed_out
+  cancelled
+}
+
+enum EvidenceWorkerStatus {
+  online
+  idle
+  busy
+  offline
+  error
+}
+
 model Tenant {
   id        String       @id
   name      String
@@ -142,6 +162,8 @@ model Tenant {
   auditArtifacts   AuditArtifact[]
   skillRunAttempts SkillRunAttempt[]
   aiRunAnalyses    AiRunAnalysis[]
+  evidenceTasks    EvidenceTask[]
+  evidenceWorkers  EvidenceWorker[]
 
   @@map("tenants")
 }
@@ -155,7 +177,7 @@ model Workspace {
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
 
-  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   agents           Agent[]
   skills           Skill[]
   skillVersions    SkillVersion[]
@@ -172,6 +194,8 @@ model Workspace {
   auditArtifacts   AuditArtifact[]
   skillRunAttempts SkillRunAttempt[]
   aiRunAnalyses    AiRunAnalysis[]
+  evidenceTasks    EvidenceTask[]
+  evidenceWorkers  EvidenceWorker[]
 
   @@unique([tenantId, key])
   @@index([tenantId])
@@ -338,45 +362,46 @@ model Connector {
 }
 
 model SkillRun {
-  id                    String          @id
-  tenantId              String          @map("tenant_id")
-  workspaceId           String          @map("workspace_id")
-  traceId               String          @map("trace_id")
-  agentId               String?         @map("agent_id")
-  skillRecordId         String?         @map("skill_record_id")
-  matchedPolicyRecordId String?         @map("matched_policy_record_id")
+  id                    String         @id
+  tenantId              String         @map("tenant_id")
+  workspaceId           String         @map("workspace_id")
+  traceId               String         @map("trace_id")
+  agentId               String?        @map("agent_id")
+  skillRecordId         String?        @map("skill_record_id")
+  matchedPolicyRecordId String?        @map("matched_policy_record_id")
   source                AgentSource
-  adapterType           AdapterType     @map("adapter_type")
-  rawAction             String          @map("raw_action")
+  adapterType           AdapterType    @map("adapter_type")
+  rawAction             String         @map("raw_action")
   environment           Environment?
-  mode                  GovernanceMode  @default(enforce)
+  mode                  GovernanceMode @default(enforce)
   decision              Decision?
-  riskLevel             RiskLevel?      @map("risk_level")
-  riskScore             Int?            @map("risk_score")
-  riskReasons           Json            @default("[]") @map("risk_reasons")
-  context               Json            @default("{}")
-  requestedAt           DateTime        @default(now()) @map("requested_at")
-  status                SkillRunStatus  @default(requested)
+  riskLevel             RiskLevel?     @map("risk_level")
+  riskScore             Int?           @map("risk_score")
+  riskReasons           Json           @default("[]") @map("risk_reasons")
+  context               Json           @default("{}")
+  requestedAt           DateTime       @default(now()) @map("requested_at")
+  status                SkillRunStatus @default(requested)
   reason                String?
-  resolvedSkillSnapshot Json            @default("{}") @map("resolved_skill_snapshot")
-  policySnapshot        Json            @default("{}") @map("policy_snapshot")
-  createdAt             DateTime        @default(now()) @map("created_at")
-  updatedAt             DateTime        @updatedAt @map("updated_at")
+  resolvedSkillSnapshot Json           @default("{}") @map("resolved_skill_snapshot")
+  policySnapshot        Json           @default("{}") @map("policy_snapshot")
+  createdAt             DateTime       @default(now()) @map("created_at")
+  updatedAt             DateTime       @updatedAt @map("updated_at")
 
-  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  agent             Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  skill             Skill?             @relation(fields: [skillRecordId], references: [id], onDelete: SetNull)
-  matchedPolicy     Policy?            @relation("MatchedPolicyRuns", fields: [matchedPolicyRecordId], references: [id], onDelete: SetNull)
-  gateCheckResults  GateCheckResult[]
-  approvalRequest   ApprovalRequest?
-  executionTokens   ExecutionToken[]
-  executionLogs     ExecutionLog[]
-  dryRunResult      DryRunResult?
-  skillRunAttempts  SkillRunAttempt[]
-  auditEvents       AuditEvent[]
-  auditArtifacts    AuditArtifact[]
-  aiRunAnalysis     AiRunAnalysis?
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent            Agent?            @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  skill            Skill?            @relation(fields: [skillRecordId], references: [id], onDelete: SetNull)
+  matchedPolicy    Policy?           @relation("MatchedPolicyRuns", fields: [matchedPolicyRecordId], references: [id], onDelete: SetNull)
+  gateCheckResults GateCheckResult[]
+  approvalRequest  ApprovalRequest?
+  executionTokens  ExecutionToken[]
+  executionLogs    ExecutionLog[]
+  dryRunResult     DryRunResult?
+  skillRunAttempts SkillRunAttempt[]
+  evidenceTasks    EvidenceTask[]
+  auditEvents      AuditEvent[]
+  auditArtifacts   AuditArtifact[]
+  aiRunAnalysis    AiRunAnalysis?
 
   @@index([traceId])
   @@index([tenantId, createdAt])
@@ -400,9 +425,10 @@ model GateCheckResult {
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
 
-  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  skillRun  SkillRun  @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  skillRun      SkillRun       @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
+  evidenceTasks EvidenceTask[]
 
   @@unique([skillRunId, checkKey])
   @@index([tenantId, workspaceId, status])
@@ -410,32 +436,33 @@ model GateCheckResult {
 }
 
 model ApprovalRequest {
-  id               String         @id
-  tenantId         String         @map("tenant_id")
-  workspaceId      String         @map("workspace_id")
-  skillRunId       String         @unique @map("skill_run_id")
-  status           ApprovalStatus @default(pending)
-  riskLevel        RiskLevel      @map("risk_level")
-  approvalReadiness String        @default("blocked") @map("approval_readiness")
-  missingChecks    Json           @default("[]") @map("missing_checks")
-  requiredApprovers Json          @default("[]") @map("required_approvers")
-  evidence         Json           @default("{}")
-  requestedBy      String?        @map("requested_by")
-  approvedByUserId String?        @map("approved_by_user_id")
-  deniedByUserId   String?        @map("denied_by_user_id")
-  approvedAt       DateTime?      @map("approved_at")
-  deniedAt         DateTime?      @map("denied_at")
-  expiresAt        DateTime?      @map("expires_at")
-  comment          String?
-  createdAt        DateTime       @default(now()) @map("created_at")
-  updatedAt        DateTime       @updatedAt @map("updated_at")
+  id                String         @id
+  tenantId          String         @map("tenant_id")
+  workspaceId       String         @map("workspace_id")
+  skillRunId        String         @unique @map("skill_run_id")
+  status            ApprovalStatus @default(pending)
+  riskLevel         RiskLevel      @map("risk_level")
+  approvalReadiness String         @default("blocked") @map("approval_readiness")
+  missingChecks     Json           @default("[]") @map("missing_checks")
+  requiredApprovers Json           @default("[]") @map("required_approvers")
+  evidence          Json           @default("{}")
+  requestedBy       String?        @map("requested_by")
+  approvedByUserId  String?        @map("approved_by_user_id")
+  deniedByUserId    String?        @map("denied_by_user_id")
+  approvedAt        DateTime?      @map("approved_at")
+  deniedAt          DateTime?      @map("denied_at")
+  expiresAt         DateTime?      @map("expires_at")
+  comment           String?
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
 
-  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  skillRun       SkillRun         @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
-  approvedByUser User?            @relation("ApprovalApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  deniedByUser   User?            @relation("ApprovalDeniedBy", fields: [deniedByUserId], references: [id], onDelete: SetNull)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  skillRun        SkillRun         @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
+  approvedByUser  User?            @relation("ApprovalApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  deniedByUser    User?            @relation("ApprovalDeniedBy", fields: [deniedByUserId], references: [id], onDelete: SetNull)
   executionTokens ExecutionToken[]
+  evidenceTasks   EvidenceTask[]
 
   @@index([status, createdAt])
   @@index([skillRunId])
@@ -460,10 +487,10 @@ model ExecutionToken {
   createdAt         DateTime             @default(now()) @map("created_at")
   updatedAt         DateTime             @updatedAt @map("updated_at")
 
-  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  skillRun        SkillRun         @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
-  approvalRequest ApprovalRequest? @relation(fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  skillRun        SkillRun          @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
+  approvalRequest ApprovalRequest?  @relation(fields: [approvalRequestId], references: [id], onDelete: SetNull)
   attempts        SkillRunAttempt[]
 
   @@unique([skillRunId, tokenHash])
@@ -526,6 +553,78 @@ model AiRunAnalysis {
   @@index([tenantId, workspaceId, createdAt])
   @@index([status, createdAt])
   @@map("ai_run_analyses")
+}
+
+model EvidenceTask {
+  id                String             @id
+  tenantId          String             @map("tenant_id")
+  workspaceId       String             @map("workspace_id")
+  skillRunId        String             @map("skill_run_id")
+  approvalRequestId String?            @map("approval_request_id")
+  gateCheckResultId String             @map("gate_check_result_id")
+  traceId           String             @map("trace_id")
+  checkKey          String             @map("check_key")
+  label             String
+  evidenceSkillId   String             @map("evidence_skill_id")
+  targetSkillId     String             @map("target_skill_id")
+  runtime           String
+  status            EvidenceTaskStatus @default(queued)
+  priority          Int                @default(0)
+  attempt           Int                @default(1)
+  claimedByAgentId  String?            @map("claimed_by_agent_id")
+  leaseExpiresAt    DateTime?          @map("lease_expires_at")
+  input             Json               @default("{}")
+  result            Json               @default("{}")
+  error             Json               @default("{}")
+  createdBy         String?            @map("created_by")
+  claimedAt         DateTime?          @map("claimed_at")
+  startedAt         DateTime?          @map("started_at")
+  completedAt       DateTime?          @map("completed_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  skillRun        SkillRun         @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
+  approvalRequest ApprovalRequest? @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+  gateCheckResult GateCheckResult  @relation(fields: [gateCheckResultId], references: [id], onDelete: Cascade)
+
+  @@unique([gateCheckResultId, attempt])
+  @@index([tenantId, workspaceId, status, createdAt])
+  @@index([tenantId, workspaceId, status, priority, createdAt])
+  @@index([skillRunId, status])
+  @@index([approvalRequestId])
+  @@index([gateCheckResultId])
+  @@index([status, leaseExpiresAt])
+  @@map("evidence_tasks")
+}
+
+model EvidenceWorker {
+  id              String               @id
+  tenantId        String               @map("tenant_id")
+  workspaceId     String               @map("workspace_id")
+  agentId         String               @map("agent_id")
+  runtime         String
+  driver          String
+  status          EvidenceWorkerStatus @default(online)
+  currentTaskId   String?              @map("current_task_id")
+  currentCheckKey String?              @map("current_check_key")
+  processedCount  Int                  @default(0) @map("processed_count")
+  failedCount     Int                  @default(0) @map("failed_count")
+  metadata        Json                 @default("{}")
+  lastHeartbeatAt DateTime             @default(now()) @map("last_heartbeat_at")
+  startedAt       DateTime             @default(now()) @map("started_at")
+  stoppedAt       DateTime?            @map("stopped_at")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, workspaceId, agentId])
+  @@index([tenantId, workspaceId, status, lastHeartbeatAt])
+  @@index([currentTaskId])
+  @@map("evidence_workers")
 }
 
 model DryRunResult {

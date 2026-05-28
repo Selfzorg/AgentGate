@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../apps/api-server/src/app";
 import { approveRequest } from "../apps/api-server/src/services/approval-service";
 import { createDecisionService, type DecisionServiceResult } from "../apps/api-server/src/services/decision-service";
+import { processEvidenceTasksOnce } from "../apps/api-server/src/services/evidence-task-service";
 import { processQueuedRunById } from "../apps/runner-worker/src/runner-loop";
 
 const prisma = new PrismaClient();
@@ -16,7 +17,7 @@ const enabledConfig = {
   provider: "mock",
   model: "mock-cheap",
   maxInputTokens: 4000,
-  dailyBudgetCents: 1000
+  dailyBudgetCents: 1_000_000
 } satisfies AiProviderConfig;
 
 beforeAll(async () => {
@@ -62,7 +63,17 @@ async function replay(actionId: string) {
   return createDecisionService({ prisma, configDir }).evaluate(action?.payload);
 }
 
+async function processEvidenceForRun(runId: string) {
+  await processEvidenceTasksOnce({
+    prisma,
+    skillRunId: runId,
+    limit: 50,
+    agentId: "demo_readiness_evidence_worker"
+  });
+}
+
 async function approveDecision(decision: DecisionServiceResult, comment = "Demo QA approval evidence reviewed.") {
+  await processEvidenceForRun(decision.run_id);
   const approval = await prisma.approvalRequest.findUniqueOrThrow({
     where: { skillRunId: decision.run_id }
   });
@@ -146,8 +157,41 @@ describe("home demo readiness QA", () => {
     expect(runDetail.statusCode).toBe(200);
     expect(runDetail.json().skill_run.ai_analysis.status).toBe("failed");
     expect(approvals.statusCode).toBe(200);
+    const approvalsBody = approvals.json();
+    expect(approvalsBody.approvals.length).toBeLessThanOrEqual(25);
+    expect(approvalsBody.pagination).toMatchObject({
+      limit: 25,
+      offset: 0
+    });
     expect(auditEvents.statusCode).toBe(200);
     expect(auditIntegrity.statusCode).toBe(200);
+
+    await app.close();
+  });
+
+  it("keeps the approval queue paginated for dashboard performance", async () => {
+    const decision = await replay("production_deploy");
+    const app = await createApp({ prisma, logger: false });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/approvals?limit=5"
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.approvals.length).toBeLessThanOrEqual(5);
+    expect(body.pagination.limit).toBe(5);
+    expect(body.pagination.offset).toBe(0);
+    expect(body.pagination.total).toBeGreaterThanOrEqual(body.approvals.length);
+
+    const search = await app.inject({
+      method: "GET",
+      url: `/api/v1/approvals?limit=5&q=${encodeURIComponent(decision.run_id)}`
+    });
+    expect(search.statusCode).toBe(200);
+    const searchBody = search.json();
+    expect(searchBody.approvals.map((approval: { skill_run: { id: string } }) => approval.skill_run.id)).toContain(decision.run_id);
 
     await app.close();
   });
@@ -176,16 +220,15 @@ describe("home demo readiness QA", () => {
       }
     });
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({
-      error: "Approval is blocked by missing checks",
-      missing_checks: ["ci_passed"]
-    });
+    const body = response.json();
+    expect(body.error).toBe("Approval is blocked by missing checks");
+    expect(body.missing_checks).toContain("ci_passed");
 
     const run = await prisma.skillRun.findUniqueOrThrow({
       where: { id: decision.run_id },
       include: { approvalRequest: true, auditEvents: true }
     });
-    expect(run.status).toBe("approval_required");
+    expect(run.status).toBe("approval_pending");
     expect(run.approvalRequest?.status).toBe("pending");
     expect(run.auditEvents.map((event) => event.eventType)).not.toContain("approval.granted");
 

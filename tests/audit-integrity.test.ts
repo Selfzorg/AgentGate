@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createApp } from "../apps/api-server/src/app";
 import { approveRequest } from "../apps/api-server/src/services/approval-service";
 import { createDecisionService, type DecisionServiceResult } from "../apps/api-server/src/services/decision-service";
+import { processEvidenceTasksOnce } from "../apps/api-server/src/services/evidence-task-service";
 import { processQueuedRunById } from "../apps/runner-worker/src/runner-loop";
 import { loadDemoFixtures } from "@agentgate/config-loader";
 import { PrismaClient } from "@prisma/client";
@@ -29,7 +30,17 @@ async function replay(actionId: string) {
   return createDecisionService({ prisma, configDir }).evaluate(action?.payload);
 }
 
+async function processEvidenceForRun(runId: string) {
+  await processEvidenceTasksOnce({
+    prisma,
+    skillRunId: runId,
+    limit: 50,
+    agentId: "audit_integrity_evidence_worker"
+  });
+}
+
 async function approveDecision(decision: DecisionServiceResult) {
+  await processEvidenceForRun(decision.run_id);
   const approval = await prisma.approvalRequest.findUniqueOrThrow({
     where: { skillRunId: decision.run_id }
   });

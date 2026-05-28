@@ -1,8 +1,10 @@
 import {
+  Activity,
   AlertTriangle,
   BrainCircuit,
   CheckCircle2,
   CircleDashed,
+  Cpu,
   Clock3,
   FlaskConical,
   KeyRound,
@@ -12,7 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type StatusKind = "decision" | "risk" | "run" | "token" | "audit" | "ai" | "approval" | "gate";
+type StatusKind = "decision" | "risk" | "run" | "token" | "audit" | "ai" | "approval" | "gate" | "worker" | "evidence";
 type Tone = "success" | "danger" | "warning" | "accent" | "muted" | "default";
 
 const toneClasses: Record<Tone, string> = {
@@ -42,6 +44,7 @@ const riskTone: Record<string, Tone> = {
 const runTone: Record<string, Tone> = {
   policy_evaluated: "success",
   approval_required: "warning",
+  approval_pending: "accent",
   dry_run_required: "accent",
   approved: "success",
   credential_issued: "accent",
@@ -75,9 +78,29 @@ const gateTone: Record<string, Tone> = {
   ready: "success",
   blocked: "warning",
   pending: "warning",
+  running: "accent",
+  collecting: "accent",
   approved: "success",
   denied: "danger",
   expired: "warning"
+};
+
+const workerTone: Record<string, Tone> = {
+  online: "success",
+  idle: "muted",
+  busy: "accent",
+  offline: "warning",
+  error: "danger"
+};
+
+const evidenceTone: Record<string, Tone> = {
+  queued: "warning",
+  claimed: "accent",
+  running: "accent",
+  succeeded: "success",
+  failed: "danger",
+  timed_out: "warning",
+  cancelled: "muted"
 };
 
 function toneFor(kind: StatusKind, value: string): Tone {
@@ -88,6 +111,8 @@ function toneFor(kind: StatusKind, value: string): Tone {
   if (kind === "token") return tokenTone[normalized] ?? "muted";
   if (kind === "ai") return aiTone[normalized] ?? "muted";
   if (kind === "gate" || kind === "approval") return gateTone[normalized] ?? "muted";
+  if (kind === "worker") return workerTone[normalized] ?? "muted";
+  if (kind === "evidence") return evidenceTone[normalized] ?? "muted";
   if (kind === "audit") return normalized === "complete" ? "success" : "warning";
   return "default";
 }
@@ -104,9 +129,17 @@ function iconFor(kind: StatusKind, value: string) {
   if (kind === "ai") return BrainCircuit;
   if (kind === "audit") return normalized === "complete" ? CheckCircle2 : AlertTriangle;
   if (kind === "approval" && normalized === "blocked") return AlertTriangle;
+  if (kind === "approval" && normalized === "collecting") return Clock3;
   if (kind === "gate" && normalized === "passed") return CheckCircle2;
   if (kind === "gate" && ["failed", "missing"].includes(normalized)) return AlertTriangle;
-  if (kind === "run" && ["execution_queued", "running"].includes(normalized)) return Clock3;
+  if (kind === "gate" && ["pending", "running"].includes(normalized)) return Clock3;
+  if (kind === "worker" && normalized === "busy") return Activity;
+  if (kind === "worker" && normalized === "error") return AlertTriangle;
+  if (kind === "worker") return Cpu;
+  if (kind === "evidence" && normalized === "succeeded") return CheckCircle2;
+  if (kind === "evidence" && ["failed", "timed_out"].includes(normalized)) return AlertTriangle;
+  if (kind === "evidence" && ["queued", "claimed", "running"].includes(normalized)) return Clock3;
+  if (kind === "run" && ["execution_queued", "running", "approval_pending"].includes(normalized)) return Clock3;
   if (kind === "run" && normalized === "failed") return XCircle;
   if (kind === "run" && normalized === "completed") return CheckCircle2;
   return CircleDashed;

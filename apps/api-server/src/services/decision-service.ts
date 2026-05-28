@@ -8,6 +8,7 @@ import { resolveSkill } from "@agentgate/skill-resolver";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { normalizeActionRequest, prismaAgentSource } from "./action-request-schema";
 import { createOrUpdateApprovalRequest } from "./approval-service";
+import { collectEvidenceForRun } from "./evidence-collection-service";
 import { createGateCheckResults } from "./gate-check-service";
 import { createId } from "./id";
 
@@ -98,7 +99,8 @@ export function createDecisionService({
           : Promise.resolve(null)
       ]);
 
-      const missingChecks = missingChecksForRequest(policy.required_checks, request.context);
+      const shouldCollectEvidence = policy.decision === "REQUIRE_APPROVAL" && policy.required_checks.length > 0;
+      const missingChecks = shouldCollectEvidence ? policy.required_checks : missingChecksForRequest(policy.required_checks, request.context);
       const status = statusForDecision(policy.decision);
 
       await prisma.$transaction(async (tx) => {
@@ -146,7 +148,8 @@ export function createDecisionService({
             skillRunId: runId,
             skillId: resolvedSkill.skill_id,
             requiredChecks: policy.required_checks,
-            context: request.context
+            context: request.context,
+            mode: shouldCollectEvidence ? "pending" : "context"
           });
         }
 
@@ -159,6 +162,7 @@ export function createDecisionService({
             riskLevel: risk.risk_level,
             missingChecks,
             requiredApprovers: policy.approvers,
+            approvalReadiness: shouldCollectEvidence ? "collecting" : undefined,
             evidence: {
               policy: policy.matched_policy?.policy_id ?? null,
               reason: policy.reason,
@@ -221,6 +225,18 @@ export function createDecisionService({
         });
       });
 
+      let finalMissingChecks = missingChecks;
+      if (shouldCollectEvidence) {
+        const evidenceCollection = await collectEvidenceForRun({
+          prisma,
+          runId,
+          requestedBy: "decision-service"
+        });
+        if (evidenceCollection.status === 202) {
+          finalMissingChecks = evidenceCollection.body.missing_checks;
+        }
+      }
+
       return {
         decision: policy.decision,
         skill_id: resolvedSkill.skill_id,
@@ -233,7 +249,7 @@ export function createDecisionService({
         run_id: runId,
         mode: "enforce",
         ...(policy.decision === "FORCE_DRY_RUN" ? { dry_run_required: true } : {}),
-        ...(missingChecks.length > 0 ? { missing_checks: missingChecks } : {})
+        ...(finalMissingChecks.length > 0 ? { missing_checks: finalMissingChecks } : {})
       };
     }
   };

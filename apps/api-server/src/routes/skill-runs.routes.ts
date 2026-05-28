@@ -72,6 +72,9 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
         skillRunAttempts: {
           orderBy: { createdAt: "desc" }
         },
+        evidenceTasks: {
+          orderBy: [{ createdAt: "desc" }]
+        },
         executionLogs: {
           orderBy: { sequence: "asc" },
           take: 100
@@ -114,6 +117,17 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
           label: check.label,
           status: check.status,
           evidence: check.evidence
+        })),
+        evidence_tasks: run.evidenceTasks.map((task) => ({
+          id: task.id,
+          check_key: task.checkKey,
+          status: task.status,
+          runtime: task.runtime,
+          attempt: task.attempt,
+          claimed_by_agent_id: task.claimedByAgentId,
+          lease_expires_at: task.leaseExpiresAt?.toISOString() ?? null,
+          completed_at: task.completedAt?.toISOString() ?? null,
+          created_at: task.createdAt.toISOString()
         })),
         execution_tokens: run.executionTokens.map((token) => ({
           id: token.id,

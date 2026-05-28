@@ -8,8 +8,10 @@ export const branding = {
 
 export const navigationItems = [
   { href: "/", label: "Overview" },
+  { href: "/system-guide", label: "System Guide" },
   { href: "/live", label: "Live" },
   { href: "/approvals", label: "Approvals" },
+  { href: "/evidence", label: "Evidence" },
   { href: "/skill-runs", label: "Skill Runs" },
   { href: "/audit", label: "Audit" },
   { href: "/skills", label: "Skills" },

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { createApp } from "../apps/api-server/src/app";
 import { createDecisionService } from "../apps/api-server/src/services/decision-service";
+import { processEvidenceTasksOnce } from "../apps/api-server/src/services/evidence-task-service";
 import { loadDemoFixtures } from "@agentgate/config-loader";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -26,9 +27,19 @@ async function replay(actionId: string) {
   return createDecisionService({ prisma, configDir }).evaluate(action?.payload);
 }
 
+async function processEvidenceForRun(runId: string) {
+  await processEvidenceTasksOnce({
+    prisma,
+    skillRunId: runId,
+    limit: 50,
+    agentId: "phase2_evidence_worker"
+  });
+}
+
 describe("Phase 2 approvals and dry-runs", () => {
   it("creates an approval packet and structured gate checks for production deploy", async () => {
     const decision = await replay("production_deploy");
+    await processEvidenceForRun(decision.run_id);
     const approval = await prisma.approvalRequest.findUnique({
       where: { skillRunId: decision.run_id },
       include: {
@@ -47,6 +58,7 @@ describe("Phase 2 approvals and dry-runs", () => {
 
   it("requires a comment for critical approvals and then approves with one", async () => {
     const decision = await replay("production_deploy");
+    await processEvidenceForRun(decision.run_id);
     const app = await createApp({ prisma, logger: false });
     const approval = await prisma.approvalRequest.findUniqueOrThrow({
       where: { skillRunId: decision.run_id }

@@ -34,6 +34,20 @@ export type NormalizedActionRequest = {
     backup_exists?: boolean;
     required_reviews_passed?: boolean;
     branch_protection_satisfied?: boolean;
+    evidence_outcomes?: Record<string, unknown>;
+    evidence_runtime_overrides?: Record<
+      string,
+      Array<
+        | "codex_cli"
+        | "claude_cli"
+        | "claude_code_mcp"
+        | "codex_mcp"
+        | "internal_simulated_agent"
+        | "native_connector"
+        | "local_deterministic"
+        | "agent"
+      >
+    >;
   };
   requested_at?: string;
 };

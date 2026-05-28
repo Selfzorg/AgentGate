@@ -39,6 +39,9 @@ export default function OverviewPage() {
         <Button asChild variant="secondary">
           <Link href="/policies">View Policy Fixtures</Link>
         </Button>
+        <Button asChild variant="secondary">
+          <Link href="/system-guide">Open System Guide</Link>
+        </Button>
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         {foundationItems.map((item) => {

@@ -35,7 +35,24 @@ export const normalizedActionRequestSchema = z.object({
       schema_diff_generated: z.boolean().optional(),
       backup_exists: z.boolean().optional(),
       required_reviews_passed: z.boolean().optional(),
-      branch_protection_satisfied: z.boolean().optional()
+      branch_protection_satisfied: z.boolean().optional(),
+      evidence_outcomes: z.record(z.unknown()).optional(),
+      evidence_runtime_overrides: z
+        .record(
+          z.array(
+            z.enum([
+              "codex_cli",
+              "claude_cli",
+              "claude_code_mcp",
+              "codex_mcp",
+              "internal_simulated_agent",
+              "native_connector",
+              "local_deterministic",
+              "agent"
+            ])
+          )
+        )
+        .optional()
     })
     .default({}),
   requested_at: z.string().optional()

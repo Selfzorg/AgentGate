@@ -1,6 +1,6 @@
 # AgentGate
 
-AgentGate is the runtime governance layer for AI agent skills. The MVP now covers fixture-backed policy decisions, approvals, dry-runs, scoped execution tokens, the DB-backed runner loop, SSE execution logs, audit trace integrity, and a read-only risk scanner.
+AgentGate is the runtime governance layer for AI agent skills. The MVP now covers fixture-backed policy decisions, evidence-backed approvals, dry-runs, scoped execution tokens, the DB-backed runner loop, SSE execution logs, audit trace integrity, and a read-only risk scanner.
 
 ## Quickstart
 
@@ -41,3 +41,15 @@ pnpm test:governance
 5. Open `/audit/<trace_id>` to verify complete or incomplete lifecycle traces.
 
 The MVP simulates production mutations while persisting the governance lifecycle in Postgres.
+
+Approval evidence is collected through asynchronous read-only evidence tasks resolved from the skill registry. Claude/Codex MCP workers can claim and submit those tasks, while `pnpm evidence:process` provides deterministic local fallback for demos and tests; target deploy, merge, and database mutation skills are not executed during evidence collection. The deterministic worker processes tasks in parallel by default with `AGENTGATE_EVIDENCE_WORKER_CONCURRENCY=4`.
+
+For automatic Claude evidence collection, run `pnpm evidence:claude-worker`. The project Claude `SessionStart` hook can start this worker when Claude Code opens; set `AGENTGATE_CLAUDE_EVIDENCE_AUTOSTART=false` to opt out. The `pnpm claude:agentgate` launcher gives the project worker parallel defaults: `AGENTGATE_EVIDENCE_AGENT_MAX_TASKS_PER_TICK=4` and `AGENTGATE_EVIDENCE_AGENT_CONCURRENCY=4`.
+
+When using Claude Code through DeepSeek or another provider bridge, start it with the project-safe launcher:
+
+```sh
+pnpm claude:agentgate
+```
+
+This uses Claude Code bare mode plus explicit AgentGate settings/MCP/project instructions, avoiding provider errors about unsupported `system` role messages.

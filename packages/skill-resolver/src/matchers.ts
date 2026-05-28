@@ -17,7 +17,14 @@ export const canonicalSkillMatchers: SkillMatcher[] = [
   { pattern: "alembic upgrade head", skill_id: "run-db-migration", category: "database", default_risk_level: "critical" },
   { pattern: "mcp.github.merge_pr", skill_id: "merge-pr", category: "source_control", default_risk_level: "high" },
   { pattern: "mcp.postgres.apply_migration", skill_id: "run-db-migration", category: "database", default_risk_level: "critical" },
-  { pattern: "mcp.postgres.drop_table", skill_id: "drop-table", category: "database", default_risk_level: "critical" }
+  { pattern: "mcp.postgres.drop_table", skill_id: "drop-table", category: "database", default_risk_level: "critical" },
+  { pattern: "mcp.agentgate.agentgate_run_tests", skill_id: "run-tests", category: "code_quality", default_risk_level: "low" },
+  { pattern: "mcp.agentgate.agentgate_create_pr", skill_id: "create-pr", category: "source_control", default_risk_level: "low" },
+  { pattern: "mcp.agentgate.agentgate_merge_pr", skill_id: "merge-pr", category: "source_control", default_risk_level: "high" },
+  { pattern: "mcp.agentgate.agentgate_apply_migration", skill_id: "run-db-migration", category: "database", default_risk_level: "critical" },
+  { pattern: "mcp.agentgate.agentgate_drop_table", skill_id: "drop-table", category: "database", default_risk_level: "critical" },
+  { pattern: "mcp.agentgate.agentgate_deploy_staging", skill_id: "deploy-staging", category: "deployment", default_risk_level: "medium" },
+  { pattern: "mcp.agentgate.agentgate_deploy_production", skill_id: "deploy-production", category: "deployment", default_risk_level: "high" }
 ];
 
 export const destructiveProductionPatterns = [

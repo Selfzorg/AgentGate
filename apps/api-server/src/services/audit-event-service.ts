@@ -16,6 +16,19 @@ export async function emitAuditEvent(
   prisma: PrismaClient | Prisma.TransactionClient,
   input: AuditEventInput
 ) {
+  if ("$transaction" in prisma) {
+    return prisma.$transaction((tx) => emitAuditEventInTransaction(tx, input));
+  }
+
+  return emitAuditEventInTransaction(prisma, input);
+}
+
+async function emitAuditEventInTransaction(
+  prisma: Prisma.TransactionClient,
+  input: AuditEventInput
+) {
+  await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.traceId}))`;
+
   const latest = await prisma.auditEvent.findFirst({
     where: { traceId: input.traceId },
     orderBy: { sequence: "desc" }

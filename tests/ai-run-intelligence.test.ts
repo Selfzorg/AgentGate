@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../apps/api-server/src/app";
 import { approveRequest } from "../apps/api-server/src/services/approval-service";
 import { createDecisionService, type DecisionServiceResult } from "../apps/api-server/src/services/decision-service";
+import { processEvidenceTasksOnce } from "../apps/api-server/src/services/evidence-task-service";
 import { generateRunAnalysis } from "../apps/api-server/src/services/ai-run-analysis-service";
 import { processQueuedRunById } from "../apps/runner-worker/src/runner-loop";
 
@@ -17,7 +18,7 @@ const enabledConfig = {
   provider: "mock",
   model: "mock-cheap",
   maxInputTokens: 4000,
-  dailyBudgetCents: 1000
+  dailyBudgetCents: 1_000_000
 } satisfies AiProviderConfig;
 const disabledConfig = {
   ...enabledConfig,
@@ -71,7 +72,17 @@ async function replay(actionId: string) {
   return createDecisionService({ prisma, configDir }).evaluate(action?.payload);
 }
 
+async function processEvidenceForRun(runId: string) {
+  await processEvidenceTasksOnce({
+    prisma,
+    skillRunId: runId,
+    limit: 50,
+    agentId: "ai_run_evidence_worker"
+  });
+}
+
 async function approveDecision(decision: DecisionServiceResult, comment = "AI test approval evidence reviewed.") {
+  await processEvidenceForRun(decision.run_id);
   const approval = await prisma.approvalRequest.findUniqueOrThrow({
     where: { skillRunId: decision.run_id }
   });
@@ -258,8 +269,9 @@ describe("AI Run Intelligence", () => {
       include: { approvalRequest: true, executionTokens: true }
     });
     expect(run.decision).toBe("REQUIRE_APPROVAL");
-    expect(run.status).toBe("approval_required");
+    expect(run.status).toBe("approval_pending");
     expect(run.approvalRequest?.status).toBe("pending");
+    expect(run.approvalRequest?.approvalReadiness).toBe("collecting");
     expect(run.executionTokens).toHaveLength(0);
 
     await app.close();

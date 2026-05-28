@@ -1,32 +1,66 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { Check, ExternalLink, FlaskConical, X } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Check, ExternalLink, FlaskConical, RefreshCw, Search, X } from "lucide-react";
 import {
   approveApproval,
   denyApproval,
   forceDryRun,
   getApprovals,
+  retryApprovalEvidence,
   type ApprovalRecord
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+
+const APPROVAL_PAGE_SIZE = 25;
 
 export function ApprovalCard() {
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [status, setStatus] = useState("Loading approval packets...");
   const [comments, setComments] = useState<Record<string, string>>({});
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [pagination, setPagination] = useState<{
+    limit: number;
+    offset: number;
+    total: number;
+    has_more: boolean;
+  } | null>(null);
 
-  async function loadApprovals() {
+  async function loadApprovals(options: { append?: boolean; query?: string } = {}) {
+    const offset = options.append ? approvals.length : 0;
+    const query = options.query ?? searchQuery;
+    setLoading(true);
     try {
-      const response = await getApprovals();
-      setApprovals(response.approvals);
-      setStatus(`${response.approvals.length} approval packets loaded.`);
+      const response = await getApprovals({ limit: APPROVAL_PAGE_SIZE, offset, ...(query ? { q: query } : {}) });
+      const visibleCount = offset + response.approvals.length;
+      setApprovals((current) => (options.append ? [...current, ...response.approvals] : response.approvals));
+      setPagination(response.pagination);
+      setStatus(
+        `${query ? `Search "${query}": ` : ""}Showing ${visibleCount} of ${response.pagination.total} approval packets.`
+      );
     } catch {
       setStatus("Approval API unavailable. Start the Phase 2 dev server.");
+    } finally {
+      setLoading(false);
     }
+  }
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = searchInput.trim();
+    setSearchQuery(query);
+    void loadApprovals({ query });
+  }
+
+  function clearSearch() {
+    setSearchInput("");
+    setSearchQuery("");
+    void loadApprovals({ query: "" });
   }
 
   useEffect(() => {
@@ -46,31 +80,63 @@ export function ApprovalCard() {
     }
   }
 
+  const searchControls = (
+    <form className="flex flex-wrap items-end gap-2 rounded-ui border border-border bg-surface p-4 shadow-panel" onSubmit={handleSearch}>
+      <label className="min-w-0 flex-1 text-sm font-medium">
+        Find approval
+        <input
+          className="mt-2 w-full rounded-ui border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+          value={searchInput}
+          onChange={(event) => setSearchInput(event.target.value)}
+          placeholder="Run ID, trace ID, approval ID, or action"
+        />
+      </label>
+      <Button type="submit" variant="secondary" disabled={loading || pendingAction !== null}>
+        <Search className="h-4 w-4" aria-hidden="true" />
+        Search
+      </Button>
+      {searchQuery ? (
+        <Button type="button" variant="ghost" disabled={loading || pendingAction !== null} onClick={clearSearch}>
+          <X className="h-4 w-4" aria-hidden="true" />
+          Clear
+        </Button>
+      ) : null}
+    </form>
+  );
+
   if (approvals.length === 0) {
     return (
-      <section className="max-w-2xl rounded-ui border border-border bg-surface p-5 shadow-panel">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold">No approval packets yet</h2>
-            <p className="mt-1 text-sm leading-6 text-muted">
-              Replay a production deploy or run the DB migration dry-run from Live Activity to create one.
-            </p>
+      <div className="space-y-4">
+        {searchControls}
+        <section className="max-w-2xl rounded-ui border border-border bg-surface p-5 shadow-panel">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold">No approval packets found</h2>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                {searchQuery
+                  ? "Try a different run ID, trace ID, approval ID, or action."
+                  : "Replay a production deploy or run the DB migration dry-run from Live Activity to create one."}
+              </p>
+            </div>
+            <StatusBadge kind="approval" value="ready" label="Waiting" />
           </div>
-          <StatusBadge kind="approval" value="ready" label="Waiting" />
-        </div>
-        <p className="mt-4 text-sm text-muted">{status}</p>
-      </section>
+          <p className="mt-4 text-sm text-muted">{status}</p>
+        </section>
+      </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted">{status}</p>
+      {searchControls}
+      <p className="text-sm text-muted">{status} Sorted by pending status first, then newest created time.</p>
       {approvals.map((approval) => {
         const comment = comments[approval.id] ?? "";
         const missingChecks = approval.skill_run.gate_checks.filter((check) => check.status !== "passed");
+        const collecting = approval.approval_readiness === "collecting";
         const approveBlocked =
           approval.status !== "pending" ||
+          collecting ||
           missingChecks.length > 0 ||
           (approval.risk_level === "critical" && comment.trim().length === 0);
 
@@ -94,12 +160,42 @@ export function ApprovalCard() {
               <div>
                 <h3 className="text-sm font-semibold">Gate Checks</h3>
                 <div className="mt-2 grid gap-2">
-                  {approval.skill_run.gate_checks.map((check) => (
-                    <div key={check.id} className="flex items-center justify-between rounded-ui border border-border px-3 py-2 text-sm">
-                      <span>{check.label}</span>
-                      <StatusBadge kind="gate" value={check.status} />
-                    </div>
-                  ))}
+                  {approval.skill_run.gate_checks.map((check) => {
+                    const taskId = evidenceTaskId(check.evidence);
+
+                    return (
+                      <div key={check.id} className="rounded-ui border border-border px-3 py-2 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div>{check.label}</div>
+                            <div className="mt-1 max-w-xl text-xs leading-5 text-muted">{evidenceReason(check.evidence)}</div>
+                            <div className="mt-1 max-w-xl font-mono text-[11px] leading-5 text-muted">{evidenceMeta(check.evidence)}</div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <StatusBadge kind="gate" value={check.status} />
+                            {taskId ? (
+                              <Button asChild variant="ghost">
+                                <Link href={`/evidence?task_id=${taskId}`}>
+                                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                                  Open Evidence
+                                </Link>
+                              </Button>
+                            ) : null}
+                            <Button
+                              variant="ghost"
+                              disabled={approval.status !== "pending" || pendingAction !== null}
+                              onClick={() =>
+                                void runAction(`Queue ${check.label} evidence`, () => retryApprovalEvidence(approval.id, check.check_key))
+                              }
+                            >
+                              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                              Retry
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -149,6 +245,14 @@ export function ApprovalCard() {
               </Button>
               <Button
                 variant="secondary"
+                disabled={approval.status !== "pending" || pendingAction !== null || collecting}
+                onClick={() => void runAction("Queue Evidence", () => retryApprovalEvidence(approval.id))}
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                Retry Evidence
+              </Button>
+              <Button
+                variant="secondary"
                 disabled={approval.status !== "pending" || pendingAction !== null}
                 onClick={() => void runAction("Deny", () => denyApproval(approval.id, comment))}
               >
@@ -177,6 +281,44 @@ export function ApprovalCard() {
           </section>
         );
       })}
+      {pagination?.has_more ? (
+        <div className="flex items-center justify-between gap-3 rounded-ui border border-border bg-surface p-4 shadow-panel">
+          <p className="text-sm text-muted">
+            Showing {approvals.length} of {pagination.total}. Older approval packets stay available without loading the whole queue at once.
+          </p>
+          <Button variant="secondary" disabled={loading || pendingAction !== null} onClick={() => void loadApprovals({ append: true })}>
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            {loading ? "Loading" : "Load more"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function evidenceReason(evidence: Record<string, unknown>): string {
+  if (typeof evidence.reason === "string") return evidence.reason;
+  if (typeof evidence.evidence_task_id === "string") return "Evidence task is queued for an agent worker.";
+  if (typeof evidence.status === "string") return `Evidence status: ${evidence.status}.`;
+  return "Evidence is waiting for collection.";
+}
+
+function evidenceMeta(evidence: Record<string, unknown>): string {
+  const evidenceSkill = recordFrom(evidence.evidence_skill);
+  const skillId = typeof evidenceSkill.skill_id === "string" ? evidenceSkill.skill_id : null;
+  const runtime = typeof evidence.selected_runtime === "string" ? evidence.selected_runtime : null;
+  const taskId = typeof evidence.evidence_task_id === "string" ? evidence.evidence_task_id : null;
+  if (skillId && runtime && taskId) return `${skillId} via ${runtime} task ${taskId}`;
+  if (skillId && runtime) return `${skillId} via ${runtime}`;
+  if (skillId) return skillId;
+  if (runtime) return `runtime ${runtime}`;
+  return "";
+}
+
+function evidenceTaskId(evidence: Record<string, unknown>): string | null {
+  return typeof evidence.evidence_task_id === "string" ? evidence.evidence_task_id : null;
+}
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
