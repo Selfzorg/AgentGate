@@ -7,6 +7,7 @@ import { emitAuditEvent } from "./audit-event-service";
 import { createOrUpdateApprovalRequest } from "./approval-service";
 import { createGateCheckResults } from "./gate-check-service";
 import { createId } from "./id";
+import { resolvedSkillId } from "./object-utils";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -217,14 +218,6 @@ export async function runDryRun({
       }
     };
   });
-}
-
-function resolvedSkillId(snapshot: unknown): string {
-  if (snapshot && typeof snapshot === "object" && "skill_id" in snapshot) {
-    const value = (snapshot as { skill_id?: unknown }).skill_id;
-    return typeof value === "string" ? value : "unknown";
-  }
-  return "unknown";
 }
 
 function checkIsSatisfiedAfterDryRun(check: string, context: Record<string, unknown>): boolean {

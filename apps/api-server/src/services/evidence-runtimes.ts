@@ -5,6 +5,7 @@ import {
   labelForCheck,
   normalizeEvidenceRuntimeId
 } from "./evidence-skill-registry";
+import { contextSummary, recordFrom } from "./object-utils";
 
 export type EvidenceCheckStatus = Exclude<GateCheckStatus, "pending" | "running" | "unknown">;
 
@@ -452,19 +453,4 @@ function runtimeListFrom(value: unknown): EvidenceRuntimeId[] {
       })
     )
   ];
-}
-
-function contextSummary(context: Record<string, unknown>) {
-  return {
-    repo: context.repo ?? null,
-    service: context.service ?? null,
-    environment: context.environment ?? null,
-    branch: context.branch ?? null,
-    target_branch: context.target_branch ?? null,
-    database: context.database ?? null
-  };
-}
-
-function recordFrom(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
