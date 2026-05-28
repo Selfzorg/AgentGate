@@ -10,6 +10,27 @@ const demoActionSchema = z.object({
   payload_preview: z.record(z.unknown())
 });
 
+const demoContractDecisionSchema = z.enum(["ALLOW", "DENY", "REQUIRE_APPROVAL", "FORCE_DRY_RUN", "UNGOVERNED"]);
+
+const demoContractScenarioSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  mode: z.enum(["without_agentgate", "observe", "enforce"]),
+  action_id: z.string().optional(),
+  prompt: z.string(),
+  expected: z.object({
+    decision: demoContractDecisionSchema,
+    follow_up_decision: demoContractDecisionSchema.optional(),
+    required_checks: z.array(z.string()).optional(),
+    approvers: z.array(z.string()).optional(),
+    durable_audit: z.boolean(),
+    requires_approval: z.boolean(),
+    requires_token: z.boolean(),
+    token_scopes: z.array(z.string()).optional()
+  }),
+  acceptance: z.array(z.string())
+});
+
 const demoPolicyRuleSchema = z.object({
   policy_id: z.string(),
   name: z.string(),
@@ -100,6 +121,19 @@ export const demoActionsConfigSchema = z.object({
   actions: z.array(demoActionSchema)
 });
 
+export const demoContractConfigSchema = z.object({
+  version: z.number(),
+  summary: z.string(),
+  modes: z.array(
+    z.object({
+      id: z.enum(["without_agentgate", "observe", "enforce"]),
+      label: z.string(),
+      description: z.string()
+    })
+  ),
+  scenarios: z.array(demoContractScenarioSchema)
+});
+
 export const demoGateChecksConfigSchema = z.object({
   checks: z.record(
     z.array(
@@ -115,4 +149,5 @@ export type DemoAgentsConfig = z.infer<typeof demoAgentsConfigSchema>;
 export type DemoSkillsConfig = z.infer<typeof demoSkillsConfigSchema>;
 export type DemoPoliciesConfig = z.infer<typeof demoPoliciesConfigSchema>;
 export type DemoActionsConfig = z.infer<typeof demoActionsConfigSchema>;
+export type DemoContractConfig = z.infer<typeof demoContractConfigSchema>;
 export type DemoGateChecksConfig = z.infer<typeof demoGateChecksConfigSchema>;

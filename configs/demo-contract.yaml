@@ -1,0 +1,108 @@
+version: 1
+summary: AgentGate baseline demo contract for governed developer workflows.
+modes:
+  - id: without_agentgate
+    label: Without AgentGate
+    description: Agent executes the requested command or MCP tool directly; no durable governance lifecycle is produced.
+  - id: observe
+    label: AgentGate observe mode
+    description: AgentGate records classification, risk, policy, and audit data while allowing the local action to proceed.
+  - id: enforce
+    label: AgentGate enforce mode
+    description: AgentGate blocks risky actions until required evidence, approval, token issuance, and queued execution complete.
+scenarios:
+  - id: merge_pr_without_agentgate
+    label: Merge PR without AgentGate
+    mode: without_agentgate
+    prompt: Merge PR 123 into main.
+    expected:
+      decision: UNGOVERNED
+      durable_audit: false
+      requires_approval: false
+      requires_token: false
+    acceptance:
+      - Developer can see the speed of a direct merge attempt.
+      - No AgentGate run, evidence packet, approval, execution token, or audit trace is produced.
+  - id: merge_pr_with_agentgate
+    label: Merge PR with AgentGate
+    mode: enforce
+    action_id: merge_main
+    prompt: Use AgentGate to merge PR 123 into main.
+    expected:
+      decision: REQUIRE_APPROVAL
+      required_checks:
+        - ci_passed
+        - required_reviews_passed
+        - branch_protection_satisfied
+      approvers:
+        - service_owner
+      durable_audit: true
+      requires_approval: true
+      requires_token: true
+      token_scopes:
+        - git:merge
+    acceptance:
+      - Evidence tasks are queued for CI, required reviews, and branch protection.
+      - Approval is blocked until every required check passes.
+      - A scoped token is issued only after approval.
+      - Runner logs and audit events are persisted for the approved execution.
+  - id: production_deploy_with_agentgate
+    label: Production deploy with AgentGate
+    mode: enforce
+    action_id: production_deploy
+    prompt: Deploy checkout-api to production.
+    expected:
+      decision: REQUIRE_APPROVAL
+      required_checks:
+        - ci_passed
+        - tests_passed
+        - rollback_plan_exists
+        - staging_deploy_successful
+      approvers:
+        - service_owner
+      durable_audit: true
+      requires_approval: true
+      requires_token: true
+      token_scopes:
+        - deploy:production
+    acceptance:
+      - Direct production deploy is blocked by policy.
+      - Release evidence is collected asynchronously.
+      - Service owner approval is required before queued execution.
+  - id: production_db_migration_with_agentgate
+    label: Production DB migration with AgentGate
+    mode: enforce
+    action_id: production_db_migration
+    prompt: Run npm run migrate:prod against prod-main.
+    expected:
+      decision: FORCE_DRY_RUN
+      follow_up_decision: REQUIRE_APPROVAL
+      required_checks:
+        - dry_run_completed
+        - schema_diff_generated
+        - backup_exists
+      approvers:
+        - db_owner
+        - service_owner
+      durable_audit: true
+      requires_approval: true
+      requires_token: true
+      token_scopes:
+        - database:migrate:production
+    acceptance:
+      - First live migration attempt requires dry-run evidence.
+      - Dry-run completion creates the approval packet.
+      - Critical approval requires a non-empty comment.
+  - id: destructive_db_action_denied
+    label: Destructive DB action denied
+    mode: enforce
+    action_id: mcp_drop_table
+    prompt: Drop the users table in production.
+    expected:
+      decision: DENY
+      durable_audit: true
+      requires_approval: false
+      requires_token: false
+    acceptance:
+      - Destructive production table drop is denied.
+      - No evidence tasks, approval request, execution token, or execution attempt is created.

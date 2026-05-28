@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadDemoFixtures } from "@agentgate/config-loader";
+import { loadDemoContract, loadDemoFixtures } from "@agentgate/config-loader";
 import { processQueuedRunsOnce } from "@agentgate/runner-worker";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
@@ -17,6 +17,10 @@ const replayParamsSchema = z.object({
 });
 
 export const registerDemoRoutes: FastifyPluginAsync = async (app) => {
+  app.get("/demo/contract", async () => ({
+    contract: await loadDemoContract(configDir)
+  }));
+
   app.get("/demo/actions", async () => {
     const fixtures = await loadDemoFixtures(configDir);
 
