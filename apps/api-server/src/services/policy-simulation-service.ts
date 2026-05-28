@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { loadDemoFixtures } from "@agentgate/config-loader";
 import { evaluatePolicy } from "@agentgate/policy-engine";
 import { scoreRisk } from "@agentgate/risk-engine";
+import { resolveRegistryCandidate, scanAgentSkills, type RegistryResolutionMatch } from "@agentgate/skill-registry";
 import { resolveSkill } from "@agentgate/skill-resolver";
 import { normalizeActionRequest } from "./action-request-schema";
 import { previewGateChecks } from "./gate-check-service";
@@ -12,14 +13,24 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..")
 export type PolicySimulationServiceInput = {
   rawRequest: unknown;
   configDir?: string;
+  registryRootDir?: string | undefined;
 };
 
 export async function simulatePolicyRisk({
   rawRequest,
-  configDir = join(repoRoot, "configs")
+  configDir = join(repoRoot, "configs"),
+  registryRootDir = repoRoot
 }: PolicySimulationServiceInput) {
   const request = normalizeActionRequest(rawRequest);
-  const fixtures = await loadDemoFixtures(configDir);
+  const [fixtures, registryScan] = await Promise.all([
+    loadDemoFixtures(configDir),
+    scanAgentSkills({ rootDir: registryRootDir })
+  ]);
+  const registryResolution = resolveRegistryCandidate({
+    candidates: registryScan.candidates,
+    rawAction: request.raw_action,
+    toolName: request.tool.tool_name
+  });
 
   const resolvedSkill = resolveSkill({
     rawAction: request.raw_action,
@@ -81,6 +92,14 @@ export async function simulatePolicyRisk({
       live_requires_execution_token: skillFixture?.live_requires_execution_token ?? false,
       supports_dry_run: skillFixture?.supports_dry_run ?? false
     },
+    registry_resolution: {
+      enabled: true,
+      root_dir: registryScan.rootDir,
+      candidate_count: registryScan.candidates.length,
+      selected: registryResolution.selected ? serializeRegistryMatch(registryResolution.selected) : null,
+      alternatives: registryResolution.alternatives.map(serializeRegistryMatch),
+      warnings: registryScan.warnings
+    },
     risk: {
       score: risk.risk_score,
       level: risk.risk_level,
@@ -109,6 +128,21 @@ export async function simulatePolicyRisk({
       policyId: policy.matched_policy?.policy_id ?? null,
       missingChecks
     })
+  };
+}
+
+function serializeRegistryMatch(match: RegistryResolutionMatch) {
+  return {
+    skill_id: match.candidate.skillId,
+    name: match.candidate.name,
+    source_type: match.candidate.sourceType,
+    scope: match.candidate.scope,
+    confidence: match.confidence,
+    matched_field: match.matchedField,
+    content_hash: match.candidate.contentHash,
+    side_effect_level: match.candidate.sideEffectLevel,
+    default_risk_level: match.candidate.defaultRiskLevel,
+    warnings: match.candidate.warnings
   };
 }
 

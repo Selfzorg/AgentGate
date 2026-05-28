@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createApp } from "../apps/api-server/src/app";
 import { loadDemoFixtures } from "@agentgate/config-loader";
 import type { DemoPolicyRule } from "@agentgate/core-types";
@@ -139,6 +141,61 @@ describe("PR2 policy simulation risk scanner", () => {
     await app.close();
   });
 
+  it("surfaces registry-backed resolution in simulation responses", async () => {
+    const app = await createApp({ prisma, logger: false });
+    const fixtures = await loadDemoFixtures(configDir);
+    const action = fixtures.actions.actions.find((candidate) => candidate.id === "production_deploy");
+    expect(action).toBeDefined();
+
+    await withTempWorkspace(async (workspace) => {
+      const skillDir = join(workspace, ".agents", "skills", "prod-deploy");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: Production Deploy",
+          "description: Run vercel deployment to production",
+          "---",
+          "",
+          "Deploy a release after all AgentGate evidence checks pass."
+        ].join("\n"),
+        "utf8"
+      );
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/risk-scanner/simulate",
+        payload: {
+          payload: action!.payload,
+          registry_root_dir: workspace
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        registry_resolution: {
+          candidate_count: number;
+          selected: {
+            skill_id: string;
+            source_type: string;
+            matched_field: string;
+            side_effect_level: string;
+          } | null;
+        };
+      };
+      expect(body.registry_resolution.candidate_count).toBe(1);
+      expect(body.registry_resolution.selected).toMatchObject({
+        skill_id: "codex_skill:repo:agents-skills-prod-deploy",
+        source_type: "codex_skill",
+        side_effect_level: "mutating"
+      });
+      expect(["path", "description"]).toContain(body.registry_resolution.selected?.matched_field);
+    });
+
+    await app.close();
+  });
+
   it("preserves decision precedence independent of numeric priority", () => {
     const baseRule = {
       name: "Synthetic policy",
@@ -199,3 +256,12 @@ describe("PR2 policy simulation risk scanner", () => {
     );
   });
 });
+
+async function withTempWorkspace(test: (workspace: string) => Promise<void>) {
+  const workspace = await mkdtemp(join(tmpdir(), "agentgate-policy-sim-"));
+  try {
+    await test(workspace);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}

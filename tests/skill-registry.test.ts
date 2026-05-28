@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { scanAgentSkills } from "@agentgate/skill-registry";
+import { resolveRegistryCandidate, scanAgentSkills } from "@agentgate/skill-registry";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, describe, expect, it } from "vitest";
 import { createApp } from "../apps/api-server/src/app";
@@ -98,6 +98,41 @@ describe("skill registry scanner", () => {
         name: "broken",
         sourceType: "claude_command"
       });
+    });
+  });
+
+  it("resolves actions against discovered registry candidates without requiring static matchers", async () => {
+    await withTempWorkspace(async (workspace) => {
+      const skillDir = join(workspace, ".agents", "skills", "prod-deploy");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: Production Deploy",
+          "description: Run vercel deployment to production",
+          "---",
+          "",
+          "Deploy a release after all AgentGate evidence checks pass."
+        ].join("\n"),
+        "utf8"
+      );
+
+      const scan = await scanAgentSkills({ rootDir: workspace });
+      const resolved = resolveRegistryCandidate({
+        candidates: scan.candidates,
+        rawAction: "please run vercel deploy --prod for checkout-api",
+        toolName: "Bash"
+      });
+
+      expect(resolved.selected).toMatchObject({
+        confidence: expect.any(Number),
+        candidate: {
+          skillId: "codex_skill:repo:agents-skills-prod-deploy"
+        }
+      });
+      expect(["path", "description"]).toContain(resolved.selected?.matchedField);
+      expect(resolved.selected?.confidence).toBeGreaterThanOrEqual(0.5);
     });
   });
 

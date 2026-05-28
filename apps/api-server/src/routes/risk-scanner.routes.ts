@@ -9,7 +9,8 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..")
 const configDir = join(repoRoot, "configs");
 
 const simulationBodySchema = z.object({
-  payload: z.unknown()
+  payload: z.unknown(),
+  registry_root_dir: z.string().optional()
 });
 
 export const registerRiskScannerRoutes: FastifyPluginAsync = async (app) => {
@@ -33,7 +34,8 @@ export const registerRiskScannerRoutes: FastifyPluginAsync = async (app) => {
       const body = simulationBodySchema.parse(request.body);
       return await simulatePolicyRisk({
         rawRequest: body.payload,
-        configDir
+        configDir,
+        registryRootDir: body.registry_root_dir
       });
     } catch (error) {
       if (error instanceof ZodError) {
