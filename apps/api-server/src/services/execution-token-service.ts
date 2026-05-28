@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Prisma, type ExecutionToken, type PrismaClient, type RiskLevel } from "@prisma/client";
 import { emitAuditEvent } from "./audit-event-service";
 import { createId } from "./id";
+import { resolvedSkillId } from "./object-utils";
 
 const DEFAULT_TTL_SECONDS = 600;
 
@@ -216,13 +217,4 @@ async function emitCredentialRejected(
       token_status: "rejected"
     }
   });
-}
-
-function resolvedSkillId(snapshot: unknown): string {
-  if (snapshot && typeof snapshot === "object" && "skill_id" in snapshot) {
-    const value = (snapshot as { skill_id?: unknown }).skill_id;
-    return typeof value === "string" ? value : "unknown";
-  }
-
-  return "unknown";
 }

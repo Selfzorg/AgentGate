@@ -2,6 +2,7 @@ import { Prisma, type ExecutionToken, type PrismaClient } from "@prisma/client";
 import { emitAuditEvent } from "./audit-event-service";
 import { createId } from "./id";
 import { executionTokenRequired, scopesForSkill } from "./execution-token-service";
+import { resolvedSkillId } from "./object-utils";
 
 export type QueueExecutionInput = {
   runId: string;
@@ -270,13 +271,4 @@ async function emitExecutionRejected(
       reason
     }
   });
-}
-
-function resolvedSkillId(snapshot: unknown): string {
-  if (snapshot && typeof snapshot === "object" && "skill_id" in snapshot) {
-    const value = (snapshot as { skill_id?: unknown }).skill_id;
-    return typeof value === "string" ? value : "unknown";
-  }
-
-  return "unknown";
 }

@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { recordFrom, stringFrom } from "./object-utils";
 
 export const evidenceRuntimeIds = [
   "codex_cli",
@@ -267,12 +268,4 @@ function skillTypeFrom(value: unknown): EvidenceSkillType {
 function sideEffectLevelFrom(value: unknown): EvidenceSideEffectLevel {
   if (value === "read_only" || value === "simulated" || value === "mutating") return value;
   return "mutating";
-}
-
-function stringFrom(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function recordFrom(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
