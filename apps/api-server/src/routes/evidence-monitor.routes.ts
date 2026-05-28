@@ -27,6 +27,7 @@ const workerHeartbeatBodySchema = z.object({
   current_check_key: z.string().nullable().optional(),
   processed_delta: z.number().int().nonnegative().optional(),
   failed_delta: z.number().int().nonnegative().optional(),
+  capabilities: z.record(z.unknown()).optional(),
   metadata: z.record(z.unknown()).optional()
 });
 
@@ -60,6 +61,7 @@ export const registerEvidenceMonitorRoutes: FastifyPluginAsync = async (app) => 
       currentCheckKey: body.current_check_key,
       processedDelta: body.processed_delta,
       failedDelta: body.failed_delta,
+      capabilities: body.capabilities,
       metadata: body.metadata
     });
 

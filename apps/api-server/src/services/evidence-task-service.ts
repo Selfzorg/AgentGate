@@ -12,6 +12,7 @@ import {
 } from "./evidence-task-builders";
 import { serializeApproval, serializeEvidenceTask, serializeGateCheck } from "./evidence-task-presenters";
 import { ACTIVE_EVIDENCE_TASK_STATUSES, type EvidenceStatus, type EvidenceTaskResultInput } from "./evidence-task-types";
+import { workerCapabilityClaimError } from "./evidence-worker-capabilities";
 import {
   normalizeEvidenceRuntimeId,
   resolveEvidenceSkill
@@ -271,6 +272,31 @@ export async function claimEvidenceTask(
         error: "Evidence task does not allow requested runtime",
         requested_runtime: requestedRuntime,
         allowed_runtimes: allowedRuntimesForTask(task)
+      }
+    };
+  }
+  const worker = await prisma.evidenceWorker.findUnique({
+    where: {
+      tenantId_workspaceId_agentId: {
+        tenantId: task.tenantId,
+        workspaceId: task.workspaceId,
+        agentId: input.agentId
+      }
+    }
+  });
+  const evidenceSkill = evidenceSkillFromTask(task);
+  const capabilityError = workerCapabilityClaimError({
+    worker,
+    requestedRuntime,
+    sideEffectLevel: evidenceSkill.sideEffectLevel
+  });
+  if (capabilityError) {
+    return {
+      status: 409 as const,
+      body: {
+        error: capabilityError,
+        requested_runtime: requestedRuntime,
+        worker_agent_id: input.agentId
       }
     };
   }

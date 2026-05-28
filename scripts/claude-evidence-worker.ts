@@ -275,6 +275,13 @@ async function recordWorkerHeartbeat(
         current_check_key: options.task?.check_key ?? null,
         processed_delta: options.processedDelta,
         failed_delta: options.failedDelta,
+        capabilities: {
+          runtime_ids: [config.runtime],
+          allowed_tools: toolListFrom(config.allowedTools),
+          side_effect_levels: ["read_only"],
+          max_parallel_tasks: config.concurrency,
+          supports_json_schema: config.driver === "claude"
+        },
         metadata: {
           pid: process.pid,
           once: config.once,
@@ -286,6 +293,13 @@ async function recordWorkerHeartbeat(
     },
     deps
   );
+}
+
+function toolListFrom(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 async function markWorkerStopped(config: ClaudeEvidenceWorkerConfig, deps: WorkerDeps) {

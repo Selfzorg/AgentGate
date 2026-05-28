@@ -8,6 +8,11 @@ import {
   type PrismaClient
 } from "@prisma/client";
 import { emitAuditEvent } from "./audit-event-service";
+import {
+  capabilitiesForWorker,
+  metadataWithCapabilities,
+  serializeEvidenceWorkerCapabilities
+} from "./evidence-worker-capabilities";
 import { createId } from "./id";
 
 const HEARTBEAT_STALE_MS = 90_000;
@@ -25,10 +30,16 @@ export type EvidenceWorkerHeartbeatInput = {
   processedDelta?: number | undefined;
   failedDelta?: number | undefined;
   metadata?: Record<string, unknown> | undefined;
+  capabilities?: Record<string, unknown> | undefined;
 };
 
 export async function recordEvidenceWorkerHeartbeat(prisma: PrismaClient, input: EvidenceWorkerHeartbeatInput) {
   const now = new Date();
+  const metadata = metadataWithCapabilities({
+    runtime: input.runtime,
+    metadata: input.metadata,
+    capabilities: input.capabilities
+  });
   const previous = await prisma.evidenceWorker.findUnique({
     where: {
       tenantId_workspaceId_agentId: {
@@ -59,7 +70,7 @@ export async function recordEvidenceWorkerHeartbeat(prisma: PrismaClient, input:
       currentCheckKey: input.currentCheckKey ?? null,
       processedCount: input.processedDelta ?? 0,
       failedCount: input.failedDelta ?? 0,
-      metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
+      metadata: metadata as Prisma.InputJsonValue,
       lastHeartbeatAt: now,
       stoppedAt: null
     },
@@ -71,7 +82,7 @@ export async function recordEvidenceWorkerHeartbeat(prisma: PrismaClient, input:
       currentCheckKey: input.currentCheckKey ?? null,
       processedCount: { increment: input.processedDelta ?? 0 },
       failedCount: { increment: input.failedDelta ?? 0 },
-      metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
+      metadata: metadata as Prisma.InputJsonValue,
       lastHeartbeatAt: now,
       stoppedAt: input.status === "offline" ? now : null
     }
@@ -247,7 +258,8 @@ async function emitWorkerAuditEvent(prisma: PrismaClient, worker: EvidenceWorker
       current_task_id: worker.currentTaskId,
       current_check_key: worker.currentCheckKey,
       processed_count: worker.processedCount,
-      failed_count: worker.failedCount
+      failed_count: worker.failedCount,
+      capabilities: serializeEvidenceWorkerCapabilities(capabilitiesForWorker(worker))
     }
   });
 }
@@ -257,6 +269,7 @@ function serializeEvidenceWorker(worker: EvidenceWorker) {
   const heartbeatAgeMs = now - worker.lastHeartbeatAt.getTime();
   const stale = worker.status !== "offline" && heartbeatAgeMs > HEARTBEAT_STALE_MS;
   const effectiveStatus = stale ? "offline" : worker.status;
+  const capabilities = capabilitiesForWorker(worker);
 
   return {
     id: worker.id,
@@ -272,6 +285,7 @@ function serializeEvidenceWorker(worker: EvidenceWorker) {
     current_check_key: worker.currentCheckKey,
     processed_count: worker.processedCount,
     failed_count: worker.failedCount,
+    capabilities: serializeEvidenceWorkerCapabilities(capabilities),
     metadata: worker.metadata,
     heartbeat_age_ms: heartbeatAgeMs,
     last_heartbeat_at: worker.lastHeartbeatAt.toISOString(),
