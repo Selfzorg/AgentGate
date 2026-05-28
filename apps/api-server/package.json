@@ -17,6 +17,7 @@
     "@agentgate/policy-engine": "workspace:*",
     "@agentgate/risk-engine": "workspace:*",
     "@agentgate/runner-worker": "workspace:*",
+    "@agentgate/skill-registry": "workspace:*",
     "@agentgate/skill-resolver": "workspace:*",
     "@fastify/cors": "^10.0.1",
     "@prisma/client": "^5.22.0",

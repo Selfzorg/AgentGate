@@ -12,6 +12,7 @@ import { registerExecutionTokenRoutes } from "./routes/execution-tokens.routes";
 import { registerEvidenceMonitorRoutes } from "./routes/evidence-monitor.routes";
 import { registerEvidenceTasksRoutes } from "./routes/evidence-tasks.routes";
 import { registerMcpRoutes } from "./routes/mcp.routes";
+import { registerRegistryRoutes } from "./routes/registry.routes";
 import { registerRiskScannerRoutes } from "./routes/risk-scanner.routes";
 import { registerSkillRunsRoutes } from "./routes/skill-runs.routes";
 import { registerSseRoutes } from "./routes/sse.routes";
@@ -50,6 +51,7 @@ export async function createApp(services: AppServices): Promise<FastifyInstance>
   await app.register(registerExecutionTokenRoutes, { prefix: "/api/v1" });
   await app.register(registerEvidenceMonitorRoutes, { prefix: "/api/v1" });
   await app.register(registerEvidenceTasksRoutes, { prefix: "/api/v1" });
+  await app.register(registerRegistryRoutes, { prefix: "/api/v1" });
   await app.register(registerAuditRoutes, { prefix: "/api/v1" });
   await app.register(registerCatalogRoutes, { prefix: "/api/v1" });
   await app.register(registerSseRoutes, { prefix: "/api/v1" });

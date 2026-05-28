@@ -24,6 +24,9 @@ importers:
       '@agentgate/risk-engine':
         specifier: workspace:*
         version: link:packages/risk-engine
+      '@agentgate/skill-registry':
+        specifier: workspace:*
+        version: link:packages/skill-registry
       '@agentgate/skill-resolver':
         specifier: workspace:*
         version: link:packages/skill-resolver
@@ -72,6 +75,9 @@ importers:
       '@agentgate/runner-worker':
         specifier: workspace:*
         version: link:../runner-worker
+      '@agentgate/skill-registry':
+        specifier: workspace:*
+        version: link:../../packages/skill-registry
       '@agentgate/skill-resolver':
         specifier: workspace:*
         version: link:../../packages/skill-resolver
@@ -226,6 +232,12 @@ importers:
       '@agentgate/core-types':
         specifier: workspace:*
         version: link:../core-types
+
+  packages/skill-registry:
+    dependencies:
+      yaml:
+        specifier: ^2.6.1
+        version: 2.9.0
 
   packages/skill-resolver:
     dependencies:

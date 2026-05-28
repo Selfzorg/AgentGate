@@ -35,6 +35,7 @@
     "@agentgate/ai-provider": "workspace:*",
     "@agentgate/policy-engine": "workspace:*",
     "@agentgate/risk-engine": "workspace:*",
+    "@agentgate/skill-registry": "workspace:*",
     "@agentgate/skill-resolver": "workspace:*",
     "@eslint/js": "^9.15.0",
     "@types/node": "^22.9.0",
