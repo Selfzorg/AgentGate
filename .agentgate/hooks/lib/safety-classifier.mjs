@@ -77,7 +77,7 @@ export function classifyActionSafety({ toolName, rawAction }) {
 
   const segments = normalizedAction.split(CHAIN_SPLIT).map((segment) => segment.trim()).filter(Boolean);
   const safe =
-    tool === "Bash" &&
+    isShellTool(tool) &&
     segments.length > 0 &&
     segments.every((segment) => SAFE_COMMAND_PATTERNS.some((pattern) => pattern.test(segment)));
 
@@ -88,4 +88,8 @@ export function classifyActionSafety({ toolName, rawAction }) {
       ? "Command is a clearly safe read/test command."
       : "Command is not clearly safe enough for fail-open mode."
   };
+}
+
+function isShellTool(tool) {
+  return ["Bash", "Shell", "shell", "exec_command"].includes(tool);
 }

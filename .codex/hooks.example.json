@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Shell|shell|exec_command|apply_patch|ApplyPatch|Edit|Write|mcp__.*|mcp.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .agentgate/hooks/codex-pretooluse.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}

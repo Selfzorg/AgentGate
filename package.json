@@ -20,6 +20,7 @@
     "evidence:worker": "tsx scripts/evidence-worker.ts",
     "evidence:claude-worker": "tsx scripts/claude-evidence-worker.ts",
     "claude:agentgate": "node scripts/claude-agentgate.mjs",
+    "codex:install-hook": "node scripts/install-codex-hook.mjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev --name init",
     "db:seed": "prisma db seed",

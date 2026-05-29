@@ -12,6 +12,7 @@ import type { EvidenceSkillDefinition } from "../apps/api-server/src/services/ev
 import { callAgentGateTool, listAgentGateTools, redactText, redactedJson } from "../apps/mcp-proxy/src/index";
 
 type HookOutput = {
+  decision?: "allow" | "deny";
   permissionDecision: "allow" | "deny";
   permissionDecisionReason: string;
   agentgate?: {
@@ -45,6 +46,21 @@ type NormalizerModule = {
   normalizeMcpToolName: (toolName: string) => string;
 };
 
+type CodexNormalizerModule = {
+  normalizeCodexEvent: (event: Record<string, unknown>, env?: Record<string, string | undefined>) => {
+    normalizedToolName: string;
+    supported: boolean;
+    normalizedRequest: {
+      source: string;
+      raw_action: string;
+      context: Record<string, unknown>;
+      tool: { tool_name: string };
+    };
+    safety: { isClearlySafe: boolean };
+  };
+  normalizeMcpToolName: (toolName: string) => string;
+};
+
 type HookRedactModule = {
   redactValue: (value: unknown) => unknown;
 };
@@ -54,6 +70,8 @@ let app: FastifyInstance;
 let baseUrl: string;
 let hook: HookModule;
 let normalizer: NormalizerModule;
+let codexHook: HookModule;
+let codexNormalizer: CodexNormalizerModule;
 let hookRedact: HookRedactModule;
 
 beforeAll(async () => {
@@ -71,6 +89,10 @@ beforeAll(async () => {
   normalizer = (await import(
     pathToFileURL(join(process.cwd(), ".agentgate/hooks/lib/normalize-claude-event.mjs")).href
   )) as NormalizerModule;
+  codexHook = (await import(pathToFileURL(join(process.cwd(), ".agentgate/hooks/codex-pretooluse.mjs")).href)) as HookModule;
+  codexNormalizer = (await import(
+    pathToFileURL(join(process.cwd(), ".agentgate/hooks/lib/normalize-codex-event.mjs")).href
+  )) as CodexNormalizerModule;
   hookRedact = (await import(pathToFileURL(join(process.cwd(), ".agentgate/hooks/lib/redact.mjs")).href)) as HookRedactModule;
 });
 
@@ -207,6 +229,118 @@ describe("Claude Code hook integration", () => {
       {
         hook_event_name: "PreToolUse",
         tool_name: "Bash",
+        tool_input: { command: "pnpm test" }
+      },
+      {
+        AGENTGATE_API_BASE_URL: "http://127.0.0.1:1",
+        AGENTGATE_HOOK_FAIL_MODE: "open",
+        AGENTGATE_HOOK_TIMEOUT_MS: "150"
+      }
+    );
+
+    expect(output.permissionDecision).toBe("allow");
+    expect(output.agentgate?.offline).toBe(true);
+    expect(output.agentgate?.mode).toBe("observe");
+  });
+});
+
+describe("Codex hook integration", () => {
+  it("maps a safe shell command to ALLOW", async () => {
+    const output = await runCodexHook({
+      hook_event_name: "PreToolUse",
+      tool_name: "Shell",
+      tool_input: { command: "pnpm test" },
+      cwd: process.cwd()
+    });
+
+    expect(output.decision).toBe("allow");
+    expect(output.permissionDecision).toBe("allow");
+    expect(output.agentgate?.decision).toBe("ALLOW");
+  });
+
+  it("normalizes shell, apply_patch, and MCP tool calls", () => {
+    const shell = codexNormalizer.normalizeCodexEvent({
+      hook_event_name: "PreToolUse",
+      tool_name: "Shell",
+      tool_input: { command: "git status" }
+    });
+    const patch = codexNormalizer.normalizeCodexEvent({
+      hook_event_name: "PreToolUse",
+      tool_name: "apply_patch",
+      tool_input: { file_path: "apps/api-server/src/app.ts" }
+    });
+    const mcp = codexNormalizer.normalizeCodexEvent({
+      hook_event_name: "PreToolUse",
+      tool_name: "mcp__github__merge_pr",
+      tool_input: { pr_number: 42, target_branch: "main" }
+    });
+
+    expect(shell.supported).toBe(true);
+    expect(shell.safety.isClearlySafe).toBe(true);
+    expect(shell.normalizedRequest.source).toBe("codex");
+    expect(shell.normalizedRequest.raw_action).toBe("git status");
+    expect(patch.supported).toBe(true);
+    expect(patch.normalizedRequest.raw_action).toBe("apply_patch apps/api-server/src/app.ts");
+    expect(mcp.normalizedToolName).toBe("mcp.github.merge_pr");
+    expect(mcp.normalizedRequest.tool.tool_name).toBe("mcp.github.merge_pr");
+    expect(mcp.normalizedRequest.context.target_branch).toBe("main");
+  });
+
+  it("blocks direct production PR merge in enforce mode", async () => {
+    const output = await runCodexHook({
+      hook_event_name: "PreToolUse",
+      tool_name: "Shell",
+      tool_input: {
+        command: "gh pr merge 42 --merge --delete-branch",
+        context: {
+          target_branch: "main",
+          required_reviews_passed: true,
+          branch_protection_satisfied: true
+        }
+      },
+      cwd: process.cwd()
+    });
+
+    expect(output.permissionDecision).toBe("deny");
+    expect(output.agentgate?.decision).toBe("REQUIRE_APPROVAL");
+    expect(output.agentgate?.run_id).toMatch(/^run_/);
+  });
+
+  it("allows AgentGate MCP tools through to the MCP proxy", async () => {
+    const output = await runCodexHook({
+      hook_event_name: "PreToolUse",
+      tool_name: "mcp__agentgate__agentgate_deploy_production",
+      tool_input: { service: "checkout-api" }
+    });
+
+    expect(output.permissionDecision).toBe("allow");
+    expect(output.agentgate?.delegated_to).toBe("agentgate_mcp_proxy");
+    expect(output.agentgate?.tool_name).toBe("mcp.agentgate.agentgate_deploy_production");
+  });
+
+  it("fails closed for dangerous commands when the API is unavailable", async () => {
+    const output = await runCodexHook(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Shell",
+        tool_input: { command: "vercel deploy --prod" }
+      },
+      {
+        AGENTGATE_API_BASE_URL: "http://127.0.0.1:1",
+        AGENTGATE_HOOK_FAIL_MODE: "open",
+        AGENTGATE_HOOK_TIMEOUT_MS: "150"
+      }
+    );
+
+    expect(output.permissionDecision).toBe("deny");
+    expect(output.agentgate?.offline).toBe(true);
+  });
+
+  it("fails open in observe mode for safe commands only when configured", async () => {
+    const output = await runCodexHook(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Shell",
         tool_input: { command: "pnpm test" }
       },
       {
@@ -750,6 +884,19 @@ describe("Evidence runtime adapter safety", () => {
 
 async function runHook(event: Record<string, unknown>, env: Record<string, string | undefined> = {}): Promise<HookOutput> {
   return hook.runHookEvent(
+    event,
+    {
+      ...process.env,
+      AGENTGATE_API_BASE_URL: baseUrl,
+      AGENTGATE_PROJECT_ROOT: process.cwd(),
+      ...env
+    },
+    { writeDebugLog: false }
+  );
+}
+
+async function runCodexHook(event: Record<string, unknown>, env: Record<string, string | undefined> = {}): Promise<HookOutput> {
+  return codexHook.runHookEvent(
     event,
     {
       ...process.env,
