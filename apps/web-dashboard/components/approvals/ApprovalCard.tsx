@@ -21,7 +21,7 @@ export function ApprovalCard() {
   const [status, setStatus] = useState("Loading approval packets...");
   const [comments, setComments] = useState<Record<string, string>>({});
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [pagination, setPagination] = useState<{
@@ -105,20 +105,23 @@ export function ApprovalCard() {
   );
 
   if (approvals.length === 0) {
+    const title = loading ? "Loading approval packets" : "No approval packets found";
+    const description = loading
+      ? "Fetching approval packets from the AgentGate API."
+      : searchQuery
+        ? "Try a different run ID, trace ID, approval ID, or action."
+        : "Replay a production deploy or run the DB migration dry-run from Live Activity to create one.";
+
     return (
       <div className="space-y-4">
         {searchControls}
         <section className="max-w-2xl rounded-ui border border-border bg-surface p-5 shadow-panel">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-base font-semibold">No approval packets found</h2>
-              <p className="mt-1 text-sm leading-6 text-muted">
-                {searchQuery
-                  ? "Try a different run ID, trace ID, approval ID, or action."
-                  : "Replay a production deploy or run the DB migration dry-run from Live Activity to create one."}
-              </p>
+              <h2 className="text-base font-semibold">{title}</h2>
+              <p className="mt-1 text-sm leading-6 text-muted">{description}</p>
             </div>
-            <StatusBadge kind="approval" value="ready" label="Waiting" />
+            <StatusBadge kind="approval" value="ready" label={loading ? "Loading" : "Waiting"} />
           </div>
           <p className="mt-4 text-sm text-muted">{status}</p>
         </section>

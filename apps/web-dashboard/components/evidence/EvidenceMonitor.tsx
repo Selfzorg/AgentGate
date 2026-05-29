@@ -20,7 +20,7 @@ export function EvidenceMonitor() {
   const [monitor, setMonitor] = useState<EvidenceMonitorResponse | null>(null);
   const [status, setStatus] = useState("Loading evidence queue...");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const [refreshing, setRefreshing] = useState(true);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   async function loadMonitor() {
@@ -50,6 +50,7 @@ export function EvidenceMonitor() {
     let cancelled = false;
 
     async function load() {
+      setRefreshing(true);
       try {
         const response = await getEvidenceMonitor();
         if (!cancelled) {
@@ -65,6 +66,8 @@ export function EvidenceMonitor() {
         if (!cancelled) {
           setStatus("Evidence monitor API unavailable. Start the AgentGate dev server.");
         }
+      } finally {
+        if (!cancelled) setRefreshing(false);
       }
     }
 
@@ -108,6 +111,25 @@ export function EvidenceMonitor() {
     () => monitor?.tasks.find((task) => task.id === selectedTaskId) ?? monitor?.tasks[0] ?? null,
     [monitor, selectedTaskId]
   );
+
+  if (!monitor) {
+    return (
+      <div className="space-y-5">
+        <section className="rounded-ui border border-border bg-surface p-5 shadow-panel">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold">Evidence Queue</h2>
+              <p className="mt-1 text-sm leading-6 text-muted">{status}</p>
+            </div>
+            <Button variant="secondary" disabled={refreshing} onClick={() => void loadMonitor()}>
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              {refreshing ? "Loading" : "Refresh"}
+            </Button>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
