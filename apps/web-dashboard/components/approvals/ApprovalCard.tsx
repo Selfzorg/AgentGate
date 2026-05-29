@@ -158,6 +158,8 @@ export function ApprovalCard() {
               </div>
             </div>
 
+            <ApprovalNextStep approval={approval} missingChecks={missingChecks.length} comment={comment} />
+
             <div className="mt-4 grid gap-4 lg:grid-cols-[1.2fr_1fr]">
               <div>
                 <h3 className="text-sm font-semibold">Gate Checks</h3>
@@ -227,6 +229,14 @@ export function ApprovalCard() {
             </div>
 
             <div className="mt-5 flex flex-wrap gap-2">
+              {approval.status === "approved" ? (
+                <Button asChild variant="accent">
+                  <a href={`/skill-runs/${approval.skill_run.id}`}>
+                    <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                    Continue Execution
+                  </a>
+                </Button>
+              ) : null}
               <Button
                 variant="accent"
                 disabled={approveBlocked || pendingAction !== null}
@@ -270,7 +280,7 @@ export function ApprovalCard() {
               <Button asChild variant="ghost">
                 <a href={`/skill-runs/${approval.skill_run.id}`}>
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                  Open Run
+                  {approval.status === "approved" ? "Run Details" : "Review Run"}
                 </a>
               </Button>
             </div>
@@ -323,4 +333,71 @@ function evidenceTaskId(evidence: Record<string, unknown>): string | null {
 
 function recordFrom(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function ApprovalNextStep({
+  approval,
+  missingChecks,
+  comment
+}: {
+  approval: ApprovalRecord;
+  missingChecks: number;
+  comment: string;
+}) {
+  const copy = approvalNextStepCopy(approval, missingChecks, comment);
+
+  return (
+    <div className={`mt-4 rounded-ui border p-3 text-sm ${copy.tone}`}>
+      <div className="font-semibold">{copy.title}</div>
+      <p className="mt-1 leading-6">{copy.body}</p>
+    </div>
+  );
+}
+
+function approvalNextStepCopy(approval: ApprovalRecord, missingChecks: number, comment: string) {
+  if (approval.status === "approved") {
+    return {
+      title: "Next: continue execution",
+      body: "Open the run page to issue the Claude handoff or execute a non-Claude connector path.",
+      tone: "border-success/40 bg-success/10 text-foreground"
+    };
+  }
+
+  if (approval.status === "denied") {
+    return {
+      title: "Approval denied",
+      body: "This packet is closed. Use the audit trace to inspect the final decision.",
+      tone: "border-danger/30 bg-danger/10 text-danger"
+    };
+  }
+
+  if (approval.approval_readiness === "collecting") {
+    return {
+      title: "Next: wait for evidence",
+      body: "Evidence workers are still collecting required checks. Open Evidence to inspect task progress or retry a stalled check.",
+      tone: "border-accent/30 bg-accent/5 text-foreground"
+    };
+  }
+
+  if (missingChecks > 0) {
+    return {
+      title: `Next: resolve ${missingChecks} gate check${missingChecks === 1 ? "" : "s"}`,
+      body: "Approval remains blocked until every required policy and imported-skill evidence check passes.",
+      tone: "border-warning/30 bg-warning/10 text-warning"
+    };
+  }
+
+  if (approval.risk_level === "critical" && comment.trim().length === 0) {
+    return {
+      title: "Next: add the critical-action comment",
+      body: "Critical approvals require human context before the approve button becomes available.",
+      tone: "border-warning/30 bg-warning/10 text-warning"
+    };
+  }
+
+  return {
+    title: "Next: approve once",
+    body: "All gate checks are ready. Approving creates the path to a scoped execution token and run-level handoff.",
+    tone: "border-accent/30 bg-accent/5 text-foreground"
+  };
 }

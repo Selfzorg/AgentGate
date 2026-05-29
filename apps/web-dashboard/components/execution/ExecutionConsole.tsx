@@ -15,6 +15,7 @@ import {
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { ExecutionNextStep, ExecutionStepRail } from "./ExecutionFlow";
 
 const CLAUDE_IMPORTED_SOURCE_TYPES = new Set(["claude_skill", "claude_command", "claude_subagent"]);
 const EXECUTION_READY_STATUSES = new Set(["approved", "credential_issued", "policy_evaluated"]);
@@ -226,6 +227,15 @@ export function ExecutionConsole({ runId }: { runId: string }) {
           <div className="mt-1 font-semibold">{logs.length} persisted</div>
         </div>
       </div>
+
+      <ExecutionStepRail run={run} token={token} />
+      <ExecutionNextStep
+        run={run}
+        token={token}
+        isClaudeImportedRun={isClaudeImportedRun}
+        canContinueInClaude={canContinueInClaude}
+        claudeHandoffDisabledReason={claudeHandoffDisabledReason}
+      />
 
       {token ? (
         <div className="mt-3 rounded-ui border border-border bg-background p-3 text-xs text-muted">

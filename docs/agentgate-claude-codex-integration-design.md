@@ -105,22 +105,30 @@ Current strengths:
   tools.
 - Runner loop claims queued rows and simulates execution through demo
   connectors.
+- `agentgate skills scan` discovers repo/user Claude commands, Claude
+  subagents, Codex `SKILL.md` directories, MCP configs, and local connector
+  manifests without executing downloaded code.
+- `/skills` supports scan, persisted review snapshots, per-candidate evidence
+  and policy alias review, bulk approval/rejection, duplicate-safe registry
+  writes, and enable/disable of imported versions.
+- Imported skill versions include source path, source hash, source type,
+  declared tools, side-effect classification, runtime compatibility,
+  `policy_aliases`, and `required_checks` in `skill_versions.config`.
+- Imported Claude skills can be continued through a one-time Claude handoff
+  token; Claude receives the approved skill body and reports completion through
+  the `claude complete` callback.
 
 Current gaps:
 
-- Skill registry is seeded from demo YAML and built-in fallbacks, not imported
-  from real Claude/Codex skills.
-- Skill resolver is pattern-based and cannot use registry metadata, tool
-  schemas, command names, or skill descriptions.
-- Policy rules are fixture-driven; no policy-pack UI, simulation, conflict
-  analysis, or versioned rollout.
-- Evidence workers do not advertise capabilities robustly enough for scheduling.
-- Evidence artifacts do not yet model freshness, provenance, or reuse.
-- Codex integration lacks first-class hook installer and execution parity.
-- Approved execution is simulated and not able to re-enter the original
-  Claude/Codex skill with a constrained runtime.
-- Execution token IDs are used as queue credentials; raw bearer tokens and
-  hashed storage need to be separated before live mutations.
+- Policy rules are still fixture/DB-seeded; policy-pack UI, import/export,
+  conflict analysis, and versioned rollout remain next-product work.
+- Evidence artifact caching has foundations but still needs a production
+  immutable artifact store with stronger freshness/provenance semantics.
+- Codex execution parity is not complete: scanning and governance work, but
+  live Codex original-skill execution remains disabled-by-default follow-up.
+- Claude handoff executes through Claude Code and AgentGate tokens, but a
+  hardened production sandbox and connector-owned final mutations are still
+  required before live production changes.
 
 ## 6. Core Design Principles
 
@@ -214,7 +222,7 @@ Outputs:
 Expected command:
 
 ```sh
-pnpm agentgate:skills:scan
+pnpm agentgate skills scan --root <repo-or-skills-dir>
 ```
 
 Discovery sources:
@@ -238,6 +246,8 @@ Scanner output:
 - source path and content hash
 - declared/derived allowed tools
 - runtime compatibility
+- policy alias suggestions
+- imported-skill evidence suggestions
 - side-effect classification
 - proposed category and default risk
 - evidence candidate mapping

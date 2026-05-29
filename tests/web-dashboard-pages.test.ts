@@ -83,4 +83,29 @@ describe("web dashboard page regressions", () => {
     expect(approvalCard).toContain("<a href={`/skill-runs/${approval.skill_run.id}`}>");
     expect(evidenceMonitor).toContain("<a href={`/skill-runs/${task.skill_run_id}`}>");
   });
+
+  it("keeps next-step guidance visible across import, approval, simulation, and execution flows", async () => {
+    const skillsRegistry = await readProjectFile("apps/web-dashboard/components/skills/SkillsRegistry.tsx");
+    const skillRegistryUi = await readProjectFile("apps/web-dashboard/components/skills/skill-registry-ui.tsx");
+    const approvalCard = await readProjectFile("apps/web-dashboard/components/approvals/ApprovalCard.tsx");
+    const riskScanner = await readProjectFile("apps/web-dashboard/components/risk-scanner/RiskScannerPanel.tsx");
+    const executionConsole = await readProjectFile("apps/web-dashboard/components/execution/ExecutionConsole.tsx");
+    const executionFlow = await readProjectFile("apps/web-dashboard/components/execution/ExecutionFlow.tsx");
+
+    expect(skillsRegistry).toContain("Create Review Snapshot");
+    expect(skillsRegistry).toContain("Approve Selected");
+    expect(skillRegistryUi).toContain("Next: create a review snapshot");
+    expect(skillRegistryUi).toContain("Next: trigger or simulate the imported skill");
+
+    expect(approvalCard).toContain("<ApprovalNextStep");
+    expect(approvalCard).toContain("Continue Execution");
+
+    expect(riskScanner).toContain("Build Simulation Payload");
+    expect(riskScanner).toContain("Simulate Policy");
+
+    expect(executionConsole).toContain("<ExecutionStepRail");
+    expect(executionConsole).toContain("<ExecutionNextStep");
+    expect(executionFlow).toContain("Next: continue in Claude");
+    expect(executionFlow).toContain("Claude completion callback");
+  });
 });

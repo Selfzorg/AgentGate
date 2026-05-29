@@ -374,7 +374,7 @@ function TaskDetail({
         <Button asChild variant="secondary">
           <a href={`/skill-runs/${task.skill_run_id}`}>
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
-            Open Run
+            Review Linked Run
           </a>
         </Button>
         <Button asChild variant="ghost">

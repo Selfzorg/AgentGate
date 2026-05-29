@@ -129,7 +129,7 @@ export function RiskScannerPanel() {
         2
       )
     );
-    setStatus(`Payload built from ${selectedSkill.name}`);
+    setStatus(`Payload built from ${selectedSkill.name}. Next: simulate policy.`);
   }
 
   async function runSimulation() {
@@ -280,7 +280,7 @@ export function RiskScannerPanel() {
             </label>
             <Button disabled={!selectedSkill} onClick={loadSkillPayload}>
               <Wand2 className="h-4 w-4" aria-hidden="true" />
-              Use Skill
+              Build Simulation Payload
             </Button>
           </div>
         </div>
@@ -289,14 +289,17 @@ export function RiskScannerPanel() {
       <div className="space-y-5">
         <section className="rounded-ui border border-border bg-surface p-5 shadow-panel">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold">Payload</h2>
+            <div>
+              <h2 className="text-base font-semibold">Simulation Payload</h2>
+              <p className="mt-1 text-xs text-muted">Edit JSON if needed, then run a no-side-effect policy simulation.</p>
+            </div>
             <Button onClick={() => void runSimulation()} disabled={isSimulating || payloadText.trim().length === 0}>
               {isSimulating ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               ) : (
                 <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
               )}
-              Simulate
+              Simulate Policy
             </Button>
           </div>
           <textarea

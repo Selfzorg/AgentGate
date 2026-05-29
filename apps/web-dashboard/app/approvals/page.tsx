@@ -6,7 +6,7 @@ export default function ApprovalsPage() {
     <div>
       <PageHeader
         title="Approval Queue"
-        description="Approval packets, evidence, comments, deny, and force dry-run controls are implemented in Phase 2."
+        description="Resolve evidence, approve governed actions, then continue execution from the run page."
       />
       <ApprovalCard />
     </div>

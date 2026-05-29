@@ -6,7 +6,7 @@ export default function SkillsPage() {
     <div>
       <PageHeader
         title="Skill Registry"
-        description="Seeded demo skills are loaded through the API so the UI stays independent from resolver implementation details."
+        description="Scan real Claude/Codex/MCP skills, review evidence and policy aliases, then publish versioned registry records."
       />
       <SkillsRegistry />
     </div>

@@ -1,6 +1,6 @@
 # AgentGate
 
-AgentGate is the runtime governance layer for AI agent skills. The MVP now covers fixture-backed policy decisions, evidence-backed approvals, dry-runs, scoped execution tokens, the DB-backed runner loop, SSE execution logs, audit trace integrity, and a read-only risk scanner.
+AgentGate is the runtime governance layer for AI agent skills. The MVP now covers imported Claude/Codex/MCP skill discovery, review snapshots, evidence-backed approvals, policy simulation, scoped execution tokens, Claude handoff completion, the DB-backed runner loop, SSE execution logs, and audit trace integrity.
 
 ## Quickstart
 
@@ -45,9 +45,11 @@ pnpm demo:run retry_failed_execution
 
 1. Open `/live` and compare the journey rail: without AgentGate, observe mode, and enforce mode.
 2. Replay fixture-backed actions or run a golden scenario.
-3. Review `/approvals` for approval-required actions and dry-run evidence.
-4. Open a skill run detail page to inspect token status, queue execution, and stream persisted logs.
-5. Open `/audit/<trace_id>` to verify complete or incomplete lifecycle traces.
+3. Open `/skills`, scan the repository or a downloaded skill root, create a review snapshot, edit inferred evidence, and approve selected skills into the registry.
+4. Use `/risk-scanner` to build a simulation payload from an imported skill and preview policy before enforcement.
+5. Review `/approvals` for approval-required actions and dry-run evidence.
+6. From an approved packet, choose Continue Execution to open the run page. Imported Claude skills use Continue in Claude; connector paths use scoped token plus Execute Through AgentGate.
+7. Open `/audit/<trace_id>` to verify complete or incomplete lifecycle traces.
 
 The MVP simulates production mutations while persisting the governance lifecycle in Postgres.
 

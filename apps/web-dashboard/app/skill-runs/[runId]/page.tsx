@@ -13,7 +13,7 @@ export default async function SkillRunDetailPage({
     <div>
       <PageHeader
         title={`Skill Run ${runId}`}
-        description="Issue scoped execution tokens, queue governed execution, and stream persisted logs from the database."
+        description="Follow the approved path: token, Claude handoff or connector execution, completion, logs, and audit."
       />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <ExecutionConsole runId={runId} />

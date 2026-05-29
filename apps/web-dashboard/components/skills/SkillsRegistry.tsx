@@ -10,12 +10,12 @@ import {
   scanSkillRegistry,
   setSkillVersionStatus,
   type SkillImportBatch,
-  type SkillImportCandidate,
   type SkillRecord,
   type SkillRegistryScan
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { SkillCandidateDetail } from "./SkillCandidateDetail";
 import {
   defaultReviewDraft,
   evidenceWarningsForChecks,
@@ -24,10 +24,10 @@ import {
   rawRequiredEvidenceForCandidate,
   reviewDraftsForCandidates,
   sourceTypeFromSkill,
-  uniqueStrings,
   warningCountForCandidate,
   type CandidateReviewDraft
 } from "./import-review-helpers";
+import { ImportNextStep, ImportStepRail, Metric, SourcePill, splitCsv } from "./skill-registry-ui";
 
 export function SkillsRegistry() {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
@@ -101,6 +101,15 @@ export function SkillsRegistry() {
   const activeCandidate = candidates.find((candidate) => candidate.candidate_id === activeCandidateId) ?? filteredCandidates[0] ?? null;
   const sourceOptions = [...new Set(candidates.map((candidate) => candidate.source_type))].sort();
   const selectedCount = selectedCandidateIds.length;
+  const importStage = batch
+    ? batch.status === "approved"
+      ? "imported"
+      : batch.status === "rejected"
+        ? "rejected"
+        : "review"
+    : scan
+      ? "scanned"
+      : "start";
 
   async function loadSkills() {
     try {
@@ -125,7 +134,7 @@ export function SkillsRegistry() {
       setSelectedCandidateIds([]);
       setCandidateReviews({});
       setActiveCandidateId(response.scan.candidates[0]?.id ?? null);
-      setStatus(`${response.scan.summary.total} candidates found, ${response.scan.summary.warningCount} warnings.`);
+      setStatus(`${response.scan.summary.total} candidates found, ${response.scan.summary.warningCount} warnings. Create a review snapshot to approve.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Scan failed.");
     } finally {
@@ -147,7 +156,7 @@ export function SkillsRegistry() {
       setSelectedCandidateIds(pendingIds);
       setCandidateReviews(reviewDraftsForCandidates(response.import_batch.candidates ?? []));
       setActiveCandidateId(pendingIds[0] ?? null);
-      setStatus(`Review snapshot ${response.import_batch.id} created.`);
+      setStatus(`Review snapshot ${response.import_batch.id} created. Review evidence and approve selected candidates.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Import snapshot failed.");
     } finally {
@@ -172,7 +181,9 @@ export function SkillsRegistry() {
       });
       setBatch(response.import_batch);
       setSelectedCandidateIds([]);
-      setStatus(`${response.imported.length} imported, ${response.skipped.length} unchanged, ${response.disabled.length} disabled.`);
+      setStatus(
+        `${response.imported.length} imported, ${response.skipped.length} unchanged, ${response.disabled.length} disabled. Next: trigger the skill from Claude or test it in Risk Scanner.`
+      );
       await loadSkills();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Approval failed.");
@@ -188,7 +199,7 @@ export function SkillsRegistry() {
       const response = await rejectSkillImportBatch(batch.id, comment);
       setBatch(response.import_batch);
       setSelectedCandidateIds([]);
-      setStatus(`Snapshot ${response.import_batch.id} rejected.`);
+      setStatus(`Snapshot ${response.import_batch.id} rejected. Registry rows were not created.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Reject failed.");
     } finally {
@@ -228,7 +239,7 @@ export function SkillsRegistry() {
             <input
               value={rootDir}
               onChange={(event) => setRootDir(event.target.value)}
-              placeholder="API default repository root"
+              placeholder="Current repository root"
               className="mt-1 h-10 w-full rounded-ui border border-border bg-background px-3 font-mono text-xs outline-none focus:border-accent"
             />
           </label>
@@ -243,11 +254,11 @@ export function SkillsRegistry() {
           </label>
           <Button variant="secondary" disabled={pendingAction !== null} onClick={() => void runScan()}>
             {pendingAction === "scan" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-            Scan
+            Scan Skills
           </Button>
           <Button disabled={pendingAction !== null} onClick={() => void createSnapshot()}>
             {pendingAction === "import" ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-            Snapshot
+            Create Review Snapshot
           </Button>
           <Button variant="ghost" disabled={pendingAction !== null} onClick={() => void loadSkills()}>
             <RefreshCw className="h-4 w-4" />
@@ -260,6 +271,8 @@ export function SkillsRegistry() {
           <Metric label="Duplicates" value={String(scan?.duplicateGroups.length ?? 0)} />
           <Metric label="Registry" value={String(skills.length)} />
         </div>
+        <ImportStepRail stage={importStage} />
+        <ImportNextStep stage={importStage} selectedCount={selectedCount} batchStatus={batch?.status ?? null} />
         <p className="mt-3 text-sm text-muted">{status}</p>
       </section>
 
@@ -302,7 +315,7 @@ export function SkillsRegistry() {
               </label>
               <Button variant="secondary" disabled={!batch || pendingAction !== null} onClick={selectFiltered}>
                 <CheckCircle2 className="h-4 w-4" />
-                Select Pending
+                Select Pending Candidates
               </Button>
             </div>
           </div>
@@ -333,6 +346,7 @@ export function SkillsRegistry() {
                           type="checkbox"
                           checked={selectedCandidateIds.includes(candidate.candidate_id)}
                           disabled={candidate.review_status !== "pending"}
+                          title={candidate.review_status === "preview" ? "Create a review snapshot before selecting." : undefined}
                           onChange={() => toggleCandidate(candidate.candidate_id)}
                           onClick={(event) => event.stopPropagation()}
                           className="h-4 w-4"
@@ -366,9 +380,10 @@ export function SkillsRegistry() {
               </table>
             </div>
 
-            <CandidateDetail
+            <SkillCandidateDetail
               candidate={activeCandidate}
               review={activeCandidate ? candidateReviews[activeCandidate.candidate_id] ?? defaultReviewDraft(activeCandidate) : null}
+              editable={Boolean(batch && activeCandidate?.review_status === "pending")}
               onReviewChange={(candidateId, review) =>
                 setCandidateReviews((current) => ({
                   ...current,
@@ -406,11 +421,11 @@ export function SkillsRegistry() {
               </label>
               <Button disabled={!batch || selectedCount === 0 || pendingAction !== null} onClick={() => void approveSelected()}>
                 {pendingAction === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Approve {selectedCount}
+                Approve Selected {selectedCount}
               </Button>
               <Button variant="secondary" disabled={!batch || pendingAction !== null} onClick={() => void rejectBatch()}>
                 {pendingAction === "reject" ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
-                Reject
+                Reject Snapshot
               </Button>
             </div>
           </div>
@@ -459,112 +474,4 @@ export function SkillsRegistry() {
       </section>
     </div>
   );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-ui border border-border bg-background p-3">
-      <div className="text-xs uppercase text-muted">{label}</div>
-      <div className="mt-1 font-mono text-lg font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function CandidateDetail({
-  candidate,
-  review,
-  onReviewChange
-}: {
-  candidate: SkillImportCandidate | null;
-  review: CandidateReviewDraft | null;
-  onReviewChange: (candidateId: string, review: CandidateReviewDraft) => void;
-}) {
-  if (!candidate) {
-    return <aside className="border-t border-border p-5 text-sm text-muted lg:border-l lg:border-t-0">No candidate selected.</aside>;
-  }
-
-  const activeReview = review ?? defaultReviewDraft(candidate);
-  const reviewedChecks = splitCsv(activeReview.requiredChecks);
-  const reviewedAliases = splitCsv(activeReview.policyAliases);
-  const evidenceWarnings = [
-    ...(candidate.evidence_warnings ?? []),
-    ...evidenceWarningsForChecks(reviewedChecks, candidate.required_evidence_raw ?? [])
-  ];
-  const allWarnings = uniqueStrings([...candidate.warnings, ...evidenceWarnings]);
-
-  return (
-    <aside className="border-t border-border p-5 lg:border-l lg:border-t-0">
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge kind="risk" value={candidate.default_risk_level} />
-        <SourcePill value={candidate.source_type} />
-      </div>
-      <h3 className="mt-4 text-base font-semibold">{candidate.name}</h3>
-      <p className="mt-2 text-sm leading-6 text-muted">{candidate.description ?? "No description."}</p>
-      <div className="mt-4 grid gap-3 text-xs">
-        <DetailRow label="Path" value={candidate.relative_path} />
-        <DetailRow label="Hash" value={candidate.content_hash} />
-        <DetailRow label="Skill Type" value={candidate.skill_type} />
-        <DetailRow label="Side Effect" value={candidate.side_effect_level} />
-        <DetailRow label="Runtimes" value={candidate.allowed_runtimes.join(", ") || "none"} />
-        <DetailRow label="Tools" value={candidate.declared_tools.join(", ") || "none"} />
-        <DetailRow label="Raw Evidence" value={(candidate.required_evidence_raw ?? []).join(", ") || "none"} />
-        <DetailRow label="Inferred Checks" value={(candidate.inferred_required_checks ?? []).join(", ") || "none"} />
-        <DetailRow label="Policy Aliases" value={(candidate.inferred_policy_aliases ?? []).join(", ") || "none"} />
-      </div>
-      <div className="mt-4 grid gap-3 text-xs">
-        <label>
-          <span className="font-semibold uppercase text-muted">Required Checks</span>
-          <input
-            value={activeReview.requiredChecks}
-            onChange={(event) => onReviewChange(candidate.candidate_id, { ...activeReview, requiredChecks: event.target.value })}
-            className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 font-mono text-xs outline-none focus:border-accent"
-          />
-        </label>
-        <label>
-          <span className="font-semibold uppercase text-muted">Policy Aliases</span>
-          <input
-            value={activeReview.policyAliases}
-            onChange={(event) => onReviewChange(candidate.candidate_id, { ...activeReview, policyAliases: event.target.value })}
-            className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 font-mono text-xs outline-none focus:border-accent"
-          />
-        </label>
-        {reviewedAliases.length > 0 ? <DetailRow label="Alias Count" value={String(reviewedAliases.length)} /> : null}
-      </div>
-      <div className="mt-4 space-y-2">
-        {allWarnings.length > 0 ? (
-          allWarnings.map((warning) => (
-            <div key={warning} className="rounded-ui border border-warning/30 bg-warning/10 p-2 text-xs leading-5 text-warning">
-              {warning}
-            </div>
-          ))
-        ) : (
-          <div className="rounded-ui border border-border bg-background p-2 text-xs text-muted">No import warnings.</div>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="font-semibold uppercase text-muted">{label}</div>
-      <div className="mt-1 break-words font-mono text-muted">{value}</div>
-    </div>
-  );
-}
-
-function SourcePill({ value }: { value: string }) {
-  return (
-    <span className="inline-flex rounded-ui border border-border bg-background px-2 py-1 font-mono text-[11px] uppercase text-muted">
-      {value}
-    </span>
-  );
-}
-
-function splitCsv(value: string) {
-  return value
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
 }
