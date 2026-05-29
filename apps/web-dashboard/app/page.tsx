@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { ArrowRight, Database, ShieldCheck, Workflow } from "lucide-react";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { PlaceholderPanel } from "@/components/shell/PlaceholderPanel";
@@ -31,16 +30,16 @@ export default function OverviewPage() {
       />
       <div className="mb-7 flex flex-wrap gap-3">
         <Button asChild>
-          <Link href="/live">
+          <a href="/live">
             Open Live View
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </Link>
+          </a>
         </Button>
         <Button asChild variant="secondary">
-          <Link href="/policies">View Policy Fixtures</Link>
+          <a href="/policies">View Policy Fixtures</a>
         </Button>
         <Button asChild variant="secondary">
-          <Link href="/system-guide">Open System Guide</Link>
+          <a href="/system-guide">Open System Guide</a>
         </Button>
       </div>
       <div className="grid gap-4 md:grid-cols-3">

@@ -1,9 +1,22 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 async function readProjectFile(path: string) {
   return readFile(join(process.cwd(), path), "utf8");
+}
+
+async function collectTsxFiles(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return collectTsxFiles(path);
+      return path.endsWith(".tsx") ? [path] : [];
+    })
+  );
+
+  return files.flat();
 }
 
 describe("web dashboard page regressions", () => {
@@ -19,12 +32,14 @@ describe("web dashboard page regressions", () => {
     expect(approvalCard).toContain("getApprovals");
     expect(approvalCard).toContain("approveApproval");
     expect(approvalCard).toContain("denyApproval");
-    expect(approvalCard).toContain("Link href={`/skill-runs/${approval.skill_run.id}`}");
+    expect(approvalCard).toContain("href={`/skill-runs/${approval.skill_run.id}`}");
+    expect(approvalCard).not.toContain("Link href={`/skill-runs/${approval.skill_run.id}`}");
 
     expect(evidencePage).toContain("<EvidenceMonitor />");
     expect(evidenceMonitor).toContain("getEvidenceMonitor");
     expect(evidenceMonitor).toContain("prioritizeEvidenceTask");
-    expect(evidenceMonitor).toContain("Link href={`/skill-runs/${task.skill_run_id}`}");
+    expect(evidenceMonitor).toContain("href={`/skill-runs/${task.skill_run_id}`}");
+    expect(evidenceMonitor).not.toContain("Link href={`/skill-runs/${task.skill_run_id}`}");
 
     expect(skillRunPage).toContain("<ExecutionConsole runId={runId} />");
     expect(skillRunPage).toContain("<AiInsightsEngine runId={runId} />");
@@ -52,5 +67,20 @@ describe("web dashboard page regressions", () => {
     expect(executionConsole).toContain("Loading execution state...");
     expect(executionConsole).toContain("Execution API unavailable.");
     expect(executionConsole).toContain("run state is still loading.");
+  });
+
+  it("uses document navigation so dashboard links do not depend on Next client fetch", async () => {
+    const files = await collectTsxFiles(join(process.cwd(), "apps/web-dashboard"));
+    const sources = await Promise.all(files.map(async (file) => ({ file, content: await readFile(file, "utf8") })));
+    const nextLinkImports = sources
+      .filter(({ content }) => content.includes('from "next/link"') || content.includes("from 'next/link'"))
+      .map(({ file }) => file.replace(process.cwd(), ""));
+
+    expect(nextLinkImports).toEqual([]);
+
+    const approvalCard = await readProjectFile("apps/web-dashboard/components/approvals/ApprovalCard.tsx");
+    const evidenceMonitor = await readProjectFile("apps/web-dashboard/components/evidence/EvidenceMonitor.tsx");
+    expect(approvalCard).toContain("<a href={`/skill-runs/${approval.skill_run.id}`}>");
+    expect(evidenceMonitor).toContain("<a href={`/skill-runs/${task.skill_run_id}`}>");
   });
 });

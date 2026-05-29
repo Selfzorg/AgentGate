@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { PlaceholderPanel } from "@/components/shell/PlaceholderPanel";
 
@@ -11,9 +10,9 @@ export default function AuditPage() {
       />
       <PlaceholderPanel title="Trace search placeholder">
         Open a sample trace shell at{" "}
-        <Link className="font-medium text-accent" href="/audit/trc_demo_placeholder">
+        <a className="font-medium text-accent" href="/audit/trc_demo_placeholder">
           trc_demo_placeholder
-        </Link>
+        </a>
         .
       </PlaceholderPanel>
     </div>

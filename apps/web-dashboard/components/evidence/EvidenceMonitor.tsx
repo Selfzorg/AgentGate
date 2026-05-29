@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Activity, ArrowUp, Clock3, ExternalLink, ListChecks, RefreshCw, ServerCog, Trash2 } from "lucide-react";
 import {
@@ -226,9 +225,9 @@ export function EvidenceMonitor() {
                         <StatusBadge kind="evidence" value={task.status} />
                       </td>
                       <td className="px-4 py-3">
-                        <Link className="font-mono text-xs text-accent" href={`/skill-runs/${task.skill_run_id}`}>
+                        <a className="font-mono text-xs text-accent" href={`/skill-runs/${task.skill_run_id}`}>
                           {shortId(task.skill_run_id)}
-                        </Link>
+                        </a>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted">{formatDateTime(task.updated_at)}</td>
                     </tr>
@@ -262,9 +261,9 @@ export function EvidenceMonitor() {
                   <span className="font-medium">{event.event_type}</span>
                   <span className="ml-2 text-xs text-muted">{event.actor_id ?? event.actor_type}</span>
                 </div>
-                <Link className="text-xs font-medium text-accent" href={`/audit/${event.trace_id}`}>
+                <a className="text-xs font-medium text-accent" href={`/audit/${event.trace_id}`}>
                   Open Trace
-                </Link>
+                </a>
               </div>
             ))
           ) : (
@@ -373,16 +372,16 @@ function TaskDetail({
           {pendingAction === `prioritize:${task.id}` ? "Prioritizing" : "Prioritize"}
         </Button>
         <Button asChild variant="secondary">
-          <Link href={`/skill-runs/${task.skill_run_id}`}>
+          <a href={`/skill-runs/${task.skill_run_id}`}>
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
             Open Run
-          </Link>
+          </a>
         </Button>
         <Button asChild variant="ghost">
-          <Link href={`/audit/${task.trace_id}`}>
+          <a href={`/audit/${task.trace_id}`}>
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
             Open Trace
-          </Link>
+          </a>
         </Button>
       </div>
 

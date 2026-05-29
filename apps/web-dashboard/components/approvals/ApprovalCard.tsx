@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { Check, ExternalLink, FlaskConical, RefreshCw, Search, X } from "lucide-react";
 import {
@@ -178,10 +177,10 @@ export function ApprovalCard() {
                             <StatusBadge kind="gate" value={check.status} />
                             {taskId ? (
                               <Button asChild variant="ghost">
-                                <Link href={`/evidence?task_id=${taskId}`}>
+                                <a href={`/evidence?task_id=${taskId}`}>
                                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
                                   Open Evidence
-                                </Link>
+                                </a>
                               </Button>
                             ) : null}
                             <Button
@@ -263,16 +262,16 @@ export function ApprovalCard() {
                 Deny
               </Button>
               <Button asChild variant="ghost">
-                <Link href={`/audit/${approval.skill_run.trace_id}`}>
+                <a href={`/audit/${approval.skill_run.trace_id}`}>
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
                   Open Trace
-                </Link>
+                </a>
               </Button>
               <Button asChild variant="ghost">
-                <Link href={`/skill-runs/${approval.skill_run.id}`}>
+                <a href={`/skill-runs/${approval.skill_run.id}`}>
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
                   Open Run
-                </Link>
+                </a>
               </Button>
             </div>
 

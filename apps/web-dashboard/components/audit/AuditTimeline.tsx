@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 import {
@@ -66,10 +65,10 @@ export function AuditTimeline({ traceId }: { traceId: string }) {
             {integrity ? (
               <StatusBadge kind="audit" value={integrity.complete ? "complete" : "incomplete"} />
             ) : null}
-            <Link className="inline-flex items-center gap-2 text-sm text-accent" href={`/skill-runs/${runId}`}>
+            <a className="inline-flex items-center gap-2 text-sm text-accent" href={`/skill-runs/${runId}`}>
               <ExternalLink className="h-4 w-4" aria-hidden="true" />
               Open Skill Run
-            </Link>
+            </a>
           </div>
         ) : null}
       </div>

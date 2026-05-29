@@ -1,4 +1,3 @@
-import Link from "next/link";
 import {
   Activity,
   Bot,
@@ -421,7 +420,7 @@ export function SystemGuide() {
                   <td className="px-4 py-3 font-medium">{surface.name}</td>
                   <td className="px-4 py-3 font-mono text-xs text-accent">
                     {surface.path.startsWith("/") && !surface.path.includes("[") && !surface.path.includes("+") ? (
-                      <Link href={surface.path}>{surface.path}</Link>
+                      <a href={surface.path}>{surface.path}</a>
                     ) : (
                       surface.path
                     )}

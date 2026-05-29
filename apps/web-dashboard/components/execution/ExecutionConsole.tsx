@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, ExternalLink, KeyRound, Radio, ShieldCheck, Terminal } from "lucide-react";
 import {
@@ -276,10 +275,10 @@ export function ExecutionConsole({ runId }: { runId: string }) {
         </Button>
         {run ? (
           <Button asChild variant="ghost">
-            <Link href={`/audit/${run.trace_id}`}>
+            <a href={`/audit/${run.trace_id}`}>
               <ExternalLink className="h-4 w-4" aria-hidden="true" />
               Open Audit Trace
-            </Link>
+            </a>
           </Button>
         ) : null}
       </div>

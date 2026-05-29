@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { getLiveActivity, runSkillRunDryRun, type LiveActivity } from "@/lib/api-client";
@@ -120,14 +119,14 @@ export function LiveActivityTable() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <Link className="font-mono text-xs text-accent" href={`/skill-runs/${activity.run_id}`}>
+                    <a className="font-mono text-xs text-accent" href={`/skill-runs/${activity.run_id}`}>
                       {activity.run_id}
-                    </Link>
+                    </a>
                   </td>
                   <td className="px-4 py-3">
-                    <Link className="font-mono text-xs text-accent" href={`/audit/${activity.trace_id}`}>
+                    <a className="font-mono text-xs text-accent" href={`/audit/${activity.trace_id}`}>
                       {activity.trace_id}
-                    </Link>
+                    </a>
                   </td>
                 </tr>
               ))

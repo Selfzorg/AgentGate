@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { BrainCircuit, Eye, FileClock, KeyRound, ListChecks, Radio, Route, ShieldCheck, Zap } from "lucide-react";
 import { getDemoContract } from "@/lib/api-client";
 
@@ -104,7 +103,7 @@ export async function DemoJourneyRail() {
         {journey.map((step, index) => {
           const Icon = step.icon;
           return (
-            <Link
+            <a
               key={step.label}
               href={step.href}
               className="rounded-ui border border-border bg-background p-3 text-sm transition-colors hover:border-accent hover:bg-surface"
@@ -115,7 +114,7 @@ export async function DemoJourneyRail() {
               </div>
               <div className="mt-3 font-semibold">{step.label}</div>
               <div className="mt-1 text-xs text-muted">{step.detail}</div>
-            </Link>
+            </a>
           );
         })}
       </div>
