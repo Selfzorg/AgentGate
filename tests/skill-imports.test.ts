@@ -373,6 +373,75 @@ describe("AgentGate skill import recovery scope", () => {
       }
     });
   });
+
+  it("does not let an unrelated imported Claude command downgrade production deploy governance", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createCustomerOptOutCommand(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["privacy_owner"],
+            approver_roles: ["privacy_owner"]
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const decision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            source: "mcp_proxy",
+            adapter_type: "mcp_proxy",
+            agent: {
+              agent_id: "agent_code_001",
+              agent_type: "coding_agent",
+              role: "release_agent"
+            },
+            tool: {
+              tool_name: "vercel deploy --prod"
+            },
+            raw_action: 'vercel deploy --prod({"service":"checkout-api"})',
+            context: {
+              repo: "agentgate",
+              service: "checkout-api",
+              environment: "production",
+              ci_status: "passed",
+              tests_status: "passed",
+              rollback_plan: "exists",
+              staging_deploy: "success"
+            }
+          }
+        });
+
+        expect(decision.statusCode).toBe(200);
+        const body = decision.json();
+        expect(body.skill_id).toBe("deploy-production");
+        expect(body.decision).toBe("REQUIRE_APPROVAL");
+        expect(body.risk_level).toBe("critical");
+      } finally {
+        await app.close();
+      }
+    });
+  });
 });
 
 async function withTempWorkspace(test: (workspace: string) => Promise<void>) {
@@ -442,6 +511,26 @@ async function createClaudeFixtures(workspace: string) {
   await writeFile(
     join(workspace, ".claude", "skills", "release-auditor", "SKILL.md"),
     ["---", "name: Release Auditor", "description: Verify production release evidence.", "tools: Read, Grep", "---", "", "Read-only evidence check."].join("\n"),
+    "utf8"
+  );
+}
+
+async function createCustomerOptOutCommand(workspace: string) {
+  const commandDir = join(workspace, ".claude", "commands", "ecommerce");
+  await mkdir(commandDir, { recursive: true });
+  await writeFile(
+    join(commandDir, "customer-opt-out.md"),
+    [
+      "---",
+      "name: customer-opt-out",
+      "description: Handle consumer privacy request to opt out and erase personal information under GDPR/CCPA.",
+      "allowed-tools: Bash(echo:*)",
+      "owners: privacy-team",
+      "approver_roles: privacy-owner",
+      "---",
+      "",
+      "Opt out a customer from analytics tracking."
+    ].join("\n"),
     "utf8"
   );
 }

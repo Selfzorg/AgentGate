@@ -136,6 +136,35 @@ describe("skill registry scanner", () => {
     });
   });
 
+  it("does not match short path fragments inside unrelated action tokens", async () => {
+    await withTempWorkspace(async (workspace) => {
+      const commandDir = join(workspace, ".claude", "commands", "ecommerce");
+      await mkdir(commandDir, { recursive: true });
+      await writeFile(
+        join(commandDir, "customer-opt-out.md"),
+        [
+          "---",
+          "description: Handle consumer privacy request to opt out and erase personal information.",
+          "allowed-tools: Bash(echo:*)",
+          "---",
+          "",
+          "Opt out a customer from tracking."
+        ].join("\n"),
+        "utf8"
+      );
+
+      const scan = await scanAgentSkills({ rootDir: workspace });
+      const resolved = resolveRegistryCandidate({
+        candidates: scan.candidates,
+        rawAction: 'vercel deploy --prod({"service":"checkout-api"})',
+        toolName: "vercel deploy --prod"
+      });
+
+      expect(resolved.selected).toBeNull();
+      expect(resolved.alternatives).toEqual([]);
+    });
+  });
+
   it("exposes a read-only registry scan endpoint", async () => {
     const app = await createApp({ prisma, logger: false });
     const response = await app.inject({

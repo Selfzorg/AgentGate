@@ -19,6 +19,7 @@ export type RegistryResolutionResult = {
 
 export function resolveRegistryCandidate(input: RegistryResolutionInput): RegistryResolutionResult {
   const haystack = normalize([input.rawAction, input.toolName].filter(Boolean).join(" "));
+  const haystackTokens = tokensFor(haystack);
   if (!haystack) {
     return {
       selected: null,
@@ -27,7 +28,7 @@ export function resolveRegistryCandidate(input: RegistryResolutionInput): Regist
   }
 
   const matches = input.candidates
-    .flatMap((candidate) => matchCandidate(candidate, haystack))
+    .flatMap((candidate) => matchCandidate(candidate, haystack, haystackTokens))
     .sort((left, right) => right.confidence - left.confidence || left.candidate.skillId.localeCompare(right.candidate.skillId));
 
   return {
@@ -36,20 +37,20 @@ export function resolveRegistryCandidate(input: RegistryResolutionInput): Regist
   };
 }
 
-function matchCandidate(candidate: SkillRegistryCandidate, haystack: string): RegistryResolutionMatch[] {
+function matchCandidate(candidate: SkillRegistryCandidate, haystack: string, haystackTokens: string[]): RegistryResolutionMatch[] {
   const matches: RegistryResolutionMatch[] = [];
   const skillId = normalize(candidate.skillId);
   const name = normalize(candidate.name);
-  const path = normalize(candidate.relativePath.replace(/\.md$/i, "").replace(/\/?skill$/i, ""));
+  const pathIdentity = pathIdentityFor(candidate.relativePath);
   const description = normalize(candidate.description ?? "");
 
-  if (skillId && haystack.includes(skillId)) {
+  if (skillId && tokenPhraseMatches(haystackTokens, tokensFor(skillId))) {
     matches.push({ candidate, confidence: 1, matchedField: "skill_id" });
   }
-  if (name && haystack.includes(name)) {
+  if (name && tokenPhraseMatches(haystackTokens, tokensFor(name))) {
     matches.push({ candidate, confidence: 0.92, matchedField: "name" });
   }
-  if (path && haystack.includes(lastSegment(path))) {
+  if (pathIdentity.length > 0 && tokenPhraseMatches(haystackTokens, pathIdentity)) {
     matches.push({ candidate, confidence: 0.82, matchedField: "path" });
   }
 
@@ -84,8 +85,7 @@ function tokenOverlapScore(haystack: string, value: string): number {
 function meaningfulTokens(value: string): string[] {
   return [
     ...new Set(
-      normalize(value)
-        .split(" ")
+      tokensFor(value)
         .filter((token) => token.length >= 4)
     )
   ];
@@ -99,7 +99,30 @@ function normalize(value: string): string {
     .trim();
 }
 
-function lastSegment(value: string): string {
-  const segments = value.split(" ").filter(Boolean);
-  return segments.at(-1) ?? value;
+function tokensFor(value: string): string[] {
+  return normalize(value).split(" ").filter(Boolean).map(canonicalToken);
+}
+
+function tokenPhraseMatches(haystackTokens: string[], needleTokens: string[]): boolean {
+  if (needleTokens.length === 0 || haystackTokens.length < needleTokens.length) return false;
+
+  for (let start = 0; start <= haystackTokens.length - needleTokens.length; start += 1) {
+    if (needleTokens.every((token, offset) => haystackTokens[start + offset] === token)) return true;
+  }
+
+  return false;
+}
+
+function pathIdentityFor(relativePath: string): string[] {
+  const normalizedPath = relativePath.replace(/\\/g, "/").replace(/\.md$/i, "");
+  const segments = normalizedPath.split("/").filter(Boolean);
+  const withoutSkillFile = segments.at(-1)?.toLowerCase() === "skill" ? segments.slice(0, -1) : segments;
+  const tail = withoutSkillFile.at(-1) ?? "";
+  return tokensFor(tail);
+}
+
+function canonicalToken(token: string) {
+  if (token === "prod") return "production";
+  if (token === "deployment" || token === "deploying" || token === "deployed") return "deploy";
+  return token;
 }
