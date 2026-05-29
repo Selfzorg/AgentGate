@@ -31,6 +31,18 @@ const demoContractScenarioSchema = z.object({
   acceptance: z.array(z.string())
 });
 
+const demoGoldenTraceSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  scenario_id: z.string(),
+  action_id: z.string(),
+  deterministic: z.boolean(),
+  expected_decision: z.enum(["ALLOW", "DENY", "REQUIRE_APPROVAL", "FORCE_DRY_RUN"]),
+  expected_final_status: z.string(),
+  expected_events: z.array(z.string()),
+  expected_logs: z.array(z.string())
+});
+
 const demoPolicyRuleSchema = z.object({
   policy_id: z.string(),
   name: z.string(),
@@ -145,9 +157,14 @@ export const demoGateChecksConfigSchema = z.object({
   )
 });
 
+export const demoGoldenTracesConfigSchema = z.object({
+  traces: z.array(demoGoldenTraceSchema)
+});
+
 export type DemoAgentsConfig = z.infer<typeof demoAgentsConfigSchema>;
 export type DemoSkillsConfig = z.infer<typeof demoSkillsConfigSchema>;
 export type DemoPoliciesConfig = z.infer<typeof demoPoliciesConfigSchema>;
 export type DemoActionsConfig = z.infer<typeof demoActionsConfigSchema>;
 export type DemoContractConfig = z.infer<typeof demoContractConfigSchema>;
 export type DemoGateChecksConfig = z.infer<typeof demoGateChecksConfigSchema>;
+export type DemoGoldenTracesConfig = z.infer<typeof demoGoldenTracesConfigSchema>;

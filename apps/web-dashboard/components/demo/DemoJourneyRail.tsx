@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { BrainCircuit, FileClock, KeyRound, ListChecks, Radio, Route, ShieldCheck } from "lucide-react";
+import { BrainCircuit, Eye, FileClock, KeyRound, ListChecks, Radio, Route, ShieldCheck, Zap } from "lucide-react";
+import { getDemoContract } from "@/lib/api-client";
 
 const journey = [
   {
@@ -46,7 +47,35 @@ const journey = [
   }
 ];
 
-export function DemoJourneyRail() {
+const fallbackModes = [
+  {
+    id: "without_agentgate",
+    label: "Without AgentGate",
+    description: "The agent attempts the action directly; no durable run or evidence is created."
+  },
+  {
+    id: "observe",
+    label: "AgentGate observe mode",
+    description: "AgentGate records decision context while allowing local action to continue."
+  },
+  {
+    id: "enforce",
+    label: "AgentGate enforce mode",
+    description: "AgentGate blocks risky action until evidence, approval, token, execution, logs, and audit complete."
+  }
+] as const;
+
+const modeIcons = {
+  without_agentgate: Zap,
+  observe: Eye,
+  enforce: ShieldCheck
+};
+
+export async function DemoJourneyRail() {
+  const modes = await getDemoContract()
+    .then((response) => response.contract.modes)
+    .catch(() => fallbackModes);
+
   return (
     <section className="mb-5 rounded-ui border border-border bg-surface p-4 shadow-panel">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -56,6 +85,20 @@ export function DemoJourneyRail() {
             Follow one action from deterministic decisioning through execution evidence.
           </p>
         </div>
+      </div>
+      <div className="mb-4 grid gap-2 md:grid-cols-3">
+        {modes.map((mode) => {
+          const Icon = modeIcons[mode.id];
+          return (
+            <div key={mode.id} className="rounded-ui border border-border bg-background p-3">
+              <div className="flex items-center gap-2">
+                <Icon className="h-4 w-4 text-accent" aria-hidden="true" />
+                <div className="text-sm font-semibold">{mode.label}</div>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted">{mode.description}</p>
+            </div>
+          );
+        })}
       </div>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
         {journey.map((step, index) => {

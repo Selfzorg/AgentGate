@@ -5,12 +5,14 @@ import {
   demoAgentsConfigSchema,
   demoContractConfigSchema,
   demoGateChecksConfigSchema,
+  demoGoldenTracesConfigSchema,
   demoPoliciesConfigSchema,
   demoSkillsConfigSchema,
   type DemoActionsConfig,
   type DemoAgentsConfig,
   type DemoContractConfig,
   type DemoGateChecksConfig,
+  type DemoGoldenTracesConfig,
   type DemoPoliciesConfig,
   type DemoSkillsConfig
 } from "./validate-config";
@@ -22,10 +24,11 @@ export type DemoFixtureSet = {
   actions: DemoActionsConfig;
   contract: DemoContractConfig;
   gateChecks: DemoGateChecksConfig;
+  goldenTraces: DemoGoldenTracesConfig;
 };
 
 export async function loadDemoFixtures(configDir: string): Promise<DemoFixtureSet> {
-  const [agents, skills, policies, actions, contract, gateChecks] = await Promise.all([
+  const [agents, skills, policies, actions, contract, gateChecks, goldenTraces] = await Promise.all([
     loadYamlFile(join(configDir, "demo-agents.yaml")).then((value) =>
       demoAgentsConfigSchema.parse(value)
     ),
@@ -43,12 +46,21 @@ export async function loadDemoFixtures(configDir: string): Promise<DemoFixtureSe
     ),
     loadYamlFile(join(configDir, "demo-gate-checks.yaml")).then((value) =>
       demoGateChecksConfigSchema.parse(value)
+    ),
+    loadYamlFile(join(configDir, "demo-golden-traces.yaml")).then((value) =>
+      demoGoldenTracesConfigSchema.parse(value)
     )
   ]);
 
-  return { agents, skills, policies, actions, contract, gateChecks };
+  return { agents, skills, policies, actions, contract, gateChecks, goldenTraces };
 }
 
 export async function loadDemoContract(configDir: string): Promise<DemoContractConfig> {
   return loadYamlFile(join(configDir, "demo-contract.yaml")).then((value) => demoContractConfigSchema.parse(value));
+}
+
+export async function loadDemoGoldenTraces(configDir: string): Promise<DemoGoldenTracesConfig> {
+  return loadYamlFile(join(configDir, "demo-golden-traces.yaml")).then((value) =>
+    demoGoldenTracesConfigSchema.parse(value)
+  );
 }

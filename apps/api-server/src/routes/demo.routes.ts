@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadDemoContract, loadDemoFixtures } from "@agentgate/config-loader";
+import { loadDemoContract, loadDemoFixtures, loadDemoGoldenTraces } from "@agentgate/config-loader";
 import { processQueuedRunsOnce } from "@agentgate/runner-worker";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
@@ -9,16 +9,30 @@ import { createDecisionService, type DecisionServiceResult } from "../services/d
 import { runDryRun } from "../services/dry-run-service";
 import { queueSkillRunExecution } from "../services/execution-service";
 import { issueExecutionToken } from "../services/execution-token-service";
+import { runDemoScenario, type DemoScenarioId } from "../services/demo-scenario-service";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const configDir = join(repoRoot, "configs");
 const replayParamsSchema = z.object({
   action_id: z.string()
 });
+const scenarioParamsSchema = z.object({
+  scenario_id: z.enum([
+    "merge_pr_with_agentgate",
+    "production_deploy_with_agentgate",
+    "production_db_migration_with_agentgate",
+    "deny_destructive_action",
+    "retry_failed_execution"
+  ])
+});
 
 export const registerDemoRoutes: FastifyPluginAsync = async (app) => {
   app.get("/demo/contract", async () => ({
     contract: await loadDemoContract(configDir)
+  }));
+
+  app.get("/demo/golden-traces", async () => ({
+    golden_traces: await loadDemoGoldenTraces(configDir)
   }));
 
   app.get("/demo/actions", async () => {
@@ -54,6 +68,17 @@ export const registerDemoRoutes: FastifyPluginAsync = async (app) => {
     return {
       action_id: actionId,
       decision
+    };
+  });
+
+  app.post("/demo/scenarios/:scenario_id/replay", async (request) => {
+    const { scenario_id: scenarioId } = scenarioParamsSchema.parse(request.params);
+    return {
+      scenario: await runDemoScenario({
+        prisma: app.services.prisma,
+        scenarioId: scenarioId as DemoScenarioId,
+        configDir
+      })
     };
   });
 

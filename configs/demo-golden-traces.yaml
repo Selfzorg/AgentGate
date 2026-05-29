@@ -1,0 +1,85 @@
+traces:
+  - id: golden_merge_pr
+    label: PR merge with AgentGate
+    scenario_id: merge_pr_with_agentgate
+    action_id: merge_main
+    deterministic: true
+    expected_decision: REQUIRE_APPROVAL
+    expected_final_status: completed
+    expected_events:
+      - skill.invocation.received
+      - policy.evaluated
+      - approval.requested
+      - evidence.collection.passed
+      - approval.granted
+      - credential.issued
+      - execution.queued
+      - execution.started
+      - execution.completed
+      - audit.finalized
+    expected_logs:
+      - Starting github-demo-connector
+      - GitHub simulation completed successfully.
+  - id: golden_production_deploy
+    label: Production deploy with AgentGate
+    scenario_id: production_deploy_with_agentgate
+    action_id: production_deploy
+    deterministic: true
+    expected_decision: REQUIRE_APPROVAL
+    expected_final_status: completed
+    expected_events:
+      - approval.requested
+      - evidence.collection.passed
+      - approval.granted
+      - credential.issued
+      - execution.completed
+      - audit.finalized
+    expected_logs:
+      - Starting deployment connector
+      - Deployment simulation completed successfully.
+  - id: golden_db_migration
+    label: Production DB migration with dry-run
+    scenario_id: production_db_migration_with_agentgate
+    action_id: production_db_migration
+    deterministic: true
+    expected_decision: FORCE_DRY_RUN
+    expected_final_status: completed
+    expected_events:
+      - dry_run.started
+      - dry_run.completed
+      - approval.requested
+      - approval.granted
+      - credential.issued
+      - execution.completed
+      - audit.finalized
+    expected_logs:
+      - Starting database connector
+      - Database migration simulation completed successfully.
+  - id: golden_deny_drop_table
+    label: Destructive table drop denied
+    scenario_id: deny_destructive_action
+    action_id: mcp_drop_table
+    deterministic: true
+    expected_decision: DENY
+    expected_final_status: denied
+    expected_events:
+      - skill.invocation.received
+      - risk.scored
+      - policy.evaluated
+    expected_logs: []
+  - id: golden_retry_deploy
+    label: Failed deploy retry succeeds
+    scenario_id: retry_failed_execution
+    action_id: production_deploy
+    deterministic: true
+    expected_decision: REQUIRE_APPROVAL
+    expected_final_status: completed
+    expected_events:
+      - execution.failed
+      - audit.finalized
+      - credential.reissued
+      - execution.retry_requested
+      - execution.completed
+    expected_logs:
+      - Deployment simulation failed during rollout.
+      - Deployment simulation completed successfully.

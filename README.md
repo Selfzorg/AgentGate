@@ -10,8 +10,7 @@ corepack prepare pnpm@11.3.0 --activate
 pnpm install
 cp .env.example .env
 pnpm postgres:init
-pnpm db:migrate
-pnpm db:seed
+pnpm demo:setup
 pnpm dev
 ```
 
@@ -34,10 +33,20 @@ pnpm test:governance
 
 ## Demo Flow
 
-1. Open `/risk-scanner` and simulate the fixture-backed actions before creating any runs.
-2. Open `/live` and replay the governed demo scenario.
+Reset data at any time with `pnpm demo:reset`. With `pnpm dev` running, execute a golden scenario from the terminal:
+
+```sh
+pnpm demo:run merge_pr_with_agentgate
+pnpm demo:run production_deploy_with_agentgate
+pnpm demo:run production_db_migration_with_agentgate
+pnpm demo:run deny_destructive_action
+pnpm demo:run retry_failed_execution
+```
+
+1. Open `/live` and compare the journey rail: without AgentGate, observe mode, and enforce mode.
+2. Replay fixture-backed actions or run a golden scenario.
 3. Review `/approvals` for approval-required actions and dry-run evidence.
-4. Open a skill run detail page to issue/inspect token status, queue execution, and stream persisted logs.
+4. Open a skill run detail page to inspect token status, queue execution, and stream persisted logs.
 5. Open `/audit/<trace_id>` to verify complete or incomplete lifecycle traces.
 
 The MVP simulates production mutations while persisting the governance lifecycle in Postgres.

@@ -11,6 +11,18 @@ export type DemoActionsResponse = {
   actions: DemoActionCard[];
 };
 
+export type DemoContractResponse = {
+  contract: {
+    version: number;
+    summary: string;
+    modes: Array<{
+      id: "without_agentgate" | "observe" | "enforce";
+      label: string;
+      description: string;
+    }>;
+  };
+};
+
 export type DecisionResponse = {
   decision: "ALLOW" | "DENY" | "REQUIRE_APPROVAL" | "FORCE_DRY_RUN";
   skill_id: string;
@@ -42,6 +54,19 @@ export type DemoScenarioReplayResponse = {
   runner?: {
     scanned: number;
     claimed: number;
+  };
+};
+
+export type DemoGoldenScenarioReplayResponse = {
+  scenario: {
+    scenario_id: string;
+    run_id: string;
+    trace_id: string;
+    decision: DecisionResponse["decision"];
+    final_status: string;
+    steps: Array<{ name: string; status: string; detail?: unknown }>;
+    audit_events: string[];
+    log_messages: string[];
   };
 };
 
@@ -543,6 +568,18 @@ export async function getDemoActions(): Promise<DemoActionsResponse> {
   return (await response.json()) as DemoActionsResponse;
 }
 
+export async function getDemoContract(): Promise<DemoContractResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/demo/contract`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load demo contract: ${response.status}`);
+  }
+
+  return (await response.json()) as DemoContractResponse;
+}
+
 export async function replayDemoAction(actionId: string): Promise<Response> {
   return fetch(`${apiBaseUrl}/api/v1/demo/actions/${actionId}/replay`, {
     method: "POST"
@@ -569,6 +606,18 @@ export async function replayDemoScenario(): Promise<DemoScenarioReplayResponse> 
   }
 
   return (await response.json()) as DemoScenarioReplayResponse;
+}
+
+export async function replayDemoGoldenScenario(scenarioId: string): Promise<DemoGoldenScenarioReplayResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/demo/scenarios/${encodeURIComponent(scenarioId)}/replay`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to replay demo scenario ${scenarioId}: ${response.status}`);
+  }
+
+  return (await response.json()) as DemoGoldenScenarioReplayResponse;
 }
 
 export async function getRiskScannerSamples(): Promise<{ samples: RiskScannerSample[] }> {
