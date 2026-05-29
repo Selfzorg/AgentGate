@@ -83,8 +83,8 @@ export function ExecutionConsole({ runId }: { runId: string }) {
     try {
       const approvalId = run?.approval_request?.id ?? null;
       const response = await issueExecutionToken(runId, approvalId);
-      setToken(response.execution_token);
       await reloadRun(`Token ${response.execution_token.status}: ${response.execution_token.execution_token_id}`);
+      setToken(response.execution_token);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Token issuance failed.");
     } finally {
@@ -98,7 +98,7 @@ export function ExecutionConsole({ runId }: { runId: string }) {
       const key = `ui-${runId}-${token?.execution_token_id ?? "no-token"}`;
       const response = await executeSkillRun(runId, {
         idempotency_key: key,
-        ...(token ? { execution_token_id: token.execution_token_id } : {})
+        ...(token?.token_value ? { execution_token: token.token_value } : token ? { execution_token_id: token.execution_token_id } : {})
       });
       openLogs();
       await reloadRun(`${response.status}: ${response.logs_url}`);

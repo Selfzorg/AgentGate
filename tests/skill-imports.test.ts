@@ -241,6 +241,128 @@ describe("AgentGate skill import recovery scope", () => {
       }
     });
   });
+
+  it("uses active imported registry metadata in decisions and requires raw bearer execution outside legacy mode", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createCodexSkillSet(workspace, 1);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+      const previousLegacySetting = process.env.AGENTGATE_ALLOW_LEGACY_TOKEN_ID;
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        const batchId = importResponse.json().import_batch.id as string;
+        await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${batchId}/approve`,
+          payload: {
+            owners: ["service_owner"],
+            approver_roles: ["service_owner"]
+          }
+        });
+
+        const payload = {
+          tenant_id: tenantId,
+          workspace_id: workspaceId,
+          source: "codex",
+          adapter_type: "hook",
+          agent: {
+            agent_id: "codex_import_test",
+            agent_type: "codex_cli",
+            role: "release_agent"
+          },
+          tool: {
+            tool_name: "Bash"
+          },
+          raw_action: "Please deploy checkout-api to production using vercel deploy --prod.",
+          context: {
+            environment: "production",
+            service: "checkout-api"
+          }
+        };
+
+        const simulation = await app.inject({
+          method: "POST",
+          url: "/api/v1/risk-scanner/simulate",
+          payload: { payload }
+        });
+        expect(simulation.statusCode).toBe(200);
+        expect(simulation.json().registry_resolution.imported_selected.skill_id).toContain("skill-001");
+
+        const decision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload
+        });
+        expect(decision.statusCode).toBe(200);
+        const decisionBody = decision.json();
+        expect(decisionBody.skill_id).toContain("skill-001");
+        expect(decisionBody.skill_version).toMatch(/^import-[a-f0-9]{12}$/);
+        expect(decisionBody.risk_level).toBe("high");
+        expect(decisionBody.decision).toBe("REQUIRE_APPROVAL");
+
+        const approval = await prisma.approvalRequest.findUniqueOrThrow({
+          where: { skillRunId: decisionBody.run_id }
+        });
+        await app.inject({
+          method: "POST",
+          url: `/api/v1/approvals/${approval.id}/approve`,
+          payload: {
+            comment: "Imported deploy skill reviewed."
+          }
+        });
+
+        const token = await app.inject({
+          method: "POST",
+          url: "/api/v1/execution-tokens",
+          payload: {
+            skill_run_id: decisionBody.run_id,
+            approval_id: approval.id,
+            include_token_value: true
+          }
+        });
+        const tokenBody = token.json();
+        expect(tokenBody.execution_token.token_value).toEqual(expect.any(String));
+
+        process.env.AGENTGATE_ALLOW_LEGACY_TOKEN_ID = "false";
+        const visibleTokenOnly = await app.inject({
+          method: "POST",
+          url: `/api/v1/skill-runs/${decisionBody.run_id}/execute`,
+          payload: {
+            execution_token_id: tokenBody.execution_token.execution_token_id,
+            idempotency_key: `visible-token-${decisionBody.run_id}`
+          }
+        });
+        expect(visibleTokenOnly.statusCode).toBe(403);
+        expect(visibleTokenOnly.json().error).toContain("Raw bearer execution token");
+
+        const rawBearer = await app.inject({
+          method: "POST",
+          url: `/api/v1/skill-runs/${decisionBody.run_id}/execute`,
+          payload: {
+            execution_token: tokenBody.execution_token.token_value,
+            idempotency_key: `raw-token-${decisionBody.run_id}`
+          }
+        });
+        expect(rawBearer.statusCode).toBe(202);
+      } finally {
+        if (previousLegacySetting === undefined) {
+          delete process.env.AGENTGATE_ALLOW_LEGACY_TOKEN_ID;
+        } else {
+          process.env.AGENTGATE_ALLOW_LEGACY_TOKEN_ID = previousLegacySetting;
+        }
+        await app.close();
+      }
+    });
+  });
 });
 
 async function withTempWorkspace(test: (workspace: string) => Promise<void>) {

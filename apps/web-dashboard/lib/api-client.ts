@@ -1093,7 +1093,8 @@ export async function issueExecutionToken(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       skill_run_id: runId,
-      ...(approvalId ? { approval_id: approvalId } : {})
+      ...(approvalId ? { approval_id: approvalId } : {}),
+      include_token_value: true
     })
   });
 

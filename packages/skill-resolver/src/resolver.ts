@@ -28,7 +28,8 @@ export function resolveSkill(input: ResolveSkillInput): ResolvedSkill {
       confidence: looksDestructive ? 0.7 : 0.3,
       resolver_reason: looksDestructive
         ? "Raw action matched destructive production pattern."
-        : "Raw action did not match a known AgentGate skill mapping."
+        : "Raw action did not match a known AgentGate skill mapping.",
+      resolver_source: "static_fallback"
     };
   }
 
@@ -39,6 +40,7 @@ export function resolveSkill(input: ResolveSkillInput): ResolvedSkill {
     default_risk_level: match.default_risk_level,
     confidence: 1,
     resolver_reason: "Raw action matched a canonical AgentGate skill mapping.",
+    resolver_source: "static_fallback",
     matched_pattern: match.pattern
   };
 }

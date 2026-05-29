@@ -11,6 +11,7 @@ import { createOrUpdateApprovalRequest } from "./approval-service";
 import { collectEvidenceForRun } from "./evidence-collection-service";
 import { createGateCheckResults } from "./gate-check-service";
 import { createId } from "./id";
+import { resolveImportedRegistrySkill } from "./registry-resolution-service";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -47,7 +48,13 @@ export function createDecisionService({
       const traceId = createId("trc");
       const runId = createId("run");
 
-      const resolvedSkill = resolveSkill({
+      const importedResolution = await resolveImportedRegistrySkill(prisma, {
+        tenantId: request.tenant_id,
+        workspaceId: request.workspace_id,
+        rawAction: request.raw_action,
+        toolName: request.tool.tool_name
+      });
+      const resolvedSkill = importedResolution.resolvedSkill ?? resolveSkill({
         rawAction: request.raw_action,
         toolName: request.tool.tool_name,
         context: request.context

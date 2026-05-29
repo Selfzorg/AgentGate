@@ -94,6 +94,40 @@ export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
       })
     };
   });
+
+  app.get("/policies/conflicts", async () => {
+    const policies = await app.services.prisma.policy.findMany({
+      where: { status: "active" },
+      include: {
+        versions: {
+          where: { status: "active" },
+          orderBy: { createdAt: "desc" },
+          take: 1
+        }
+      },
+      orderBy: { policyId: "asc" }
+    });
+
+    return {
+      conflicts: conflictReportForPolicies(
+        policies.flatMap((policy) => {
+          const version = policy.versions[0];
+          return version
+            ? [
+                {
+                  policy_id: policy.policyId,
+                  name: policy.name,
+                  version: version.version,
+                  priority: version.priority,
+                  decision: version.decision,
+                  definition: version.definition
+                }
+              ]
+            : [];
+        })
+      )
+    };
+  });
 };
 
 async function setSkillVersionStatus(
@@ -169,4 +203,45 @@ function sourceTypeFromConfig(config: unknown): string | null {
   const record = config && typeof config === "object" && !Array.isArray(config) ? (config as Record<string, unknown>) : {};
   const source = record.source && typeof record.source === "object" && !Array.isArray(record.source) ? (record.source as Record<string, unknown>) : {};
   return typeof source.type === "string" ? source.type : null;
+}
+
+function conflictReportForPolicies(
+  policies: Array<{
+    policy_id: string;
+    name: string;
+    version: string;
+    priority: number;
+    decision: string;
+    definition: unknown;
+  }>
+) {
+  const groups = new Map<string, typeof policies>();
+  for (const policy of policies) {
+    const key = stableJson(recordFrom(policy.definition).when ?? policy.definition);
+    const group = groups.get(key) ?? [];
+    group.push(policy);
+    groups.set(key, group);
+  }
+
+  return [...groups.entries()].flatMap(([condition_key, group]) => {
+    const decisions = new Set(group.map((policy) => policy.decision));
+    if (group.length <= 1) return [];
+    return [
+      {
+        condition_key,
+        severity: decisions.size > 1 ? "conflict" : "shadow",
+        policies: group
+      }
+    ];
+  });
+}
+
+function stableJson(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return JSON.stringify(value);
+  const record = value as Record<string, unknown>;
+  return JSON.stringify(Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]])));
+}
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }

@@ -86,6 +86,11 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
         return { status: 403 as const, body: { error: "Execution rejected because execution token is required" } };
       }
 
+      if (!input.executionToken && input.executionTokenId && !legacyTokenIdExecutionAllowed()) {
+        await emitCredentialRejected(tx, run, "Raw bearer execution token is required");
+        return { status: 403 as const, body: { error: "Raw bearer execution token is required for token-gated execution" } };
+      }
+
       const validation = await validateExecutionToken(tx, {
         tokenId: input.executionTokenId,
         rawToken: input.executionToken,
@@ -213,6 +218,12 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
       }
     };
   });
+}
+
+function legacyTokenIdExecutionAllowed() {
+  if (process.env.AGENTGATE_ALLOW_LEGACY_TOKEN_ID === "true") return true;
+  if (process.env.AGENTGATE_ALLOW_LEGACY_TOKEN_ID === "false") return false;
+  return process.env.NODE_ENV === "test";
 }
 
 async function validateExecutionToken(

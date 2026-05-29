@@ -34,6 +34,7 @@ export const registerRiskScannerRoutes: FastifyPluginAsync = async (app) => {
       const body = simulationBodySchema.parse(request.body);
       return await simulatePolicyRisk({
         rawRequest: body.payload,
+        prisma: app.services.prisma,
         configDir,
         registryRootDir: body.registry_root_dir
       });

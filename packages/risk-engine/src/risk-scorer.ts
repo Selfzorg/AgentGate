@@ -35,6 +35,13 @@ const baseScores: Record<string, number> = {
   unknown: 50
 };
 
+const riskLevelBaseScores: Record<RiskLevel, number> = {
+  low: 15,
+  medium: 45,
+  high: 70,
+  critical: 90
+};
+
 export function classifyRiskScore(score: number): RiskLevel {
   if (score >= 85) return "critical";
   if (score >= 60) return "high";
@@ -61,7 +68,7 @@ export function scoreRisk({
 }): RiskScoreResult {
   const reasons: string[] = [];
   const lowerAction = rawAction.toLowerCase();
-  let score = baseScores[resolvedSkill.skill_id] ?? 50;
+  let score = baseScores[resolvedSkill.skill_id] ?? riskLevelBaseScores[resolvedSkill.default_risk_level] ?? 50;
 
   reasons.push(`Base score ${score} for ${resolvedSkill.skill_id}.`);
 

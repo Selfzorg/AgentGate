@@ -5,19 +5,26 @@ import { evaluatePolicy } from "@agentgate/policy-engine";
 import { scoreRisk } from "@agentgate/risk-engine";
 import { resolveRegistryCandidate, scanAgentSkills, type RegistryResolutionMatch } from "@agentgate/skill-registry";
 import { resolveSkill } from "@agentgate/skill-resolver";
+import type { PrismaClient } from "@prisma/client";
 import { normalizeActionRequest } from "./action-request-schema";
 import { previewGateChecks } from "./gate-check-service";
+import {
+  resolveImportedRegistrySkill,
+  serializeImportedRegistryMatch
+} from "./registry-resolution-service";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 export type PolicySimulationServiceInput = {
   rawRequest: unknown;
+  prisma?: PrismaClient | undefined;
   configDir?: string;
   registryRootDir?: string | undefined;
 };
 
 export async function simulatePolicyRisk({
   rawRequest,
+  prisma,
   configDir = join(repoRoot, "configs"),
   registryRootDir = repoRoot
 }: PolicySimulationServiceInput) {
@@ -31,8 +38,16 @@ export async function simulatePolicyRisk({
     rawAction: request.raw_action,
     toolName: request.tool.tool_name
   });
+  const importedRegistryResolution = prisma
+    ? await resolveImportedRegistrySkill(prisma, {
+        tenantId: request.tenant_id,
+        workspaceId: request.workspace_id,
+        rawAction: request.raw_action,
+        toolName: request.tool.tool_name
+      })
+    : null;
 
-  const resolvedSkill = resolveSkill({
+  const resolvedSkill = importedRegistryResolution?.resolvedSkill ?? resolveSkill({
     rawAction: request.raw_action,
     toolName: request.tool.tool_name,
     context: request.context
@@ -96,6 +111,8 @@ export async function simulatePolicyRisk({
       enabled: true,
       root_dir: registryScan.rootDir,
       candidate_count: registryScan.candidates.length,
+      imported_candidate_count: importedRegistryResolution?.registryResolution.candidates.length ?? 0,
+      imported_selected: serializeImportedRegistryMatch(importedRegistryResolution?.registryResolution.selected ?? null),
       selected: registryResolution.selected ? serializeRegistryMatch(registryResolution.selected) : null,
       alternatives: registryResolution.alternatives.map(serializeRegistryMatch),
       warnings: registryScan.warnings
