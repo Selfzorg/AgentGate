@@ -543,6 +543,22 @@ export type SkillRunDetailResponse = {
     risk_reasons: unknown;
     status: string;
     reason: string | null;
+    resolved_skill: {
+      skill_id: string;
+      skill_version: string;
+      category: string;
+      default_risk_level: "low" | "medium" | "high" | "critical" | string;
+      confidence: number;
+      resolver_reason: string;
+      resolver_source?: "imported_registry" | "static_fallback" | string;
+      matched_field?: "skill_id" | "name" | "path" | "description" | string;
+      source_fingerprint?: {
+        source_type?: string;
+        path?: string;
+        content_hash?: string;
+        skill_version_id?: string | null;
+      };
+    } | null;
     approval_request: {
       id: string;
       status: ApprovalRecord["status"];

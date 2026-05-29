@@ -17,6 +17,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 
+const CLAUDE_IMPORTED_SOURCE_TYPES = new Set(["claude_skill", "claude_command", "claude_subagent"]);
+const EXECUTION_READY_STATUSES = new Set(["approved", "credential_issued", "policy_evaluated"]);
+
 export function ExecutionConsole({ runId }: { runId: string }) {
   const [run, setRun] = useState<SkillRunDetailResponse["skill_run"] | null>(null);
   const [token, setToken] = useState<ExecutionTokenSummary | null>(null);
@@ -172,14 +175,24 @@ export function ExecutionConsole({ runId }: { runId: string }) {
   const canIssueToken =
     !pendingAction &&
     Boolean(run) &&
-    ["approved", "credential_issued", "policy_evaluated"].includes(run?.status ?? "") &&
+    EXECUTION_READY_STATUSES.has(run?.status ?? "") &&
     (!run?.approval_request || run.approval_request.status === "approved");
   const canExecute =
     !pendingAction &&
     Boolean(run) &&
-    ["approved", "credential_issued", "policy_evaluated"].includes(run?.status ?? "") &&
+    EXECUTION_READY_STATUSES.has(run?.status ?? "") &&
     (!tokenRequired || Boolean(token?.execution_token_id));
-  const canContinueInClaude = canIssueToken && (run?.source === "claude-code" || run?.source === "claude_code");
+  const resolvedSourceType = sourceTypeFromRun(run);
+  const isClaudeImportedRun = resolvedSourceType ? CLAUDE_IMPORTED_SOURCE_TYPES.has(resolvedSourceType) : false;
+  const canContinueInClaude = canIssueToken && isClaudeImportedRun;
+  const claudeHandoffDisabledReason = canContinueInClaude
+    ? null
+    : reasonClaudeHandoffIsDisabled({
+        run,
+        pendingAction,
+        isClaudeImportedRun,
+        resolvedSourceType
+      });
 
   return (
     <section className="rounded-ui border border-border bg-surface p-5 shadow-panel">
@@ -269,6 +282,9 @@ export function ExecutionConsole({ runId }: { runId: string }) {
         ) : null}
       </div>
 
+      {claudeHandoffDisabledReason ? (
+        <p className="mt-3 text-xs text-muted">Continue in Claude unavailable: {claudeHandoffDisabledReason}</p>
+      ) : null}
       <p className="mt-4 text-sm text-muted">{status}</p>
       <div className="mt-5 overflow-hidden rounded-ui border border-border">
         <div className="border-b border-border bg-background px-3 py-2 text-xs uppercase text-muted">
@@ -299,4 +315,28 @@ function summaryFromRun(run: SkillRunDetailResponse["skill_run"]): ExecutionToke
     status: current.status,
     expires_at: current.expires_at
   };
+}
+
+function sourceTypeFromRun(run: SkillRunDetailResponse["skill_run"] | null) {
+  return run?.resolved_skill?.source_fingerprint?.source_type ?? null;
+}
+
+function reasonClaudeHandoffIsDisabled(input: {
+  run: SkillRunDetailResponse["skill_run"] | null;
+  pendingAction: string | null;
+  isClaudeImportedRun: boolean;
+  resolvedSourceType: string | null;
+}) {
+  if (!input.run) return "run state is still loading.";
+  if (input.pendingAction) return `${input.pendingAction} is still in progress.`;
+  if (!EXECUTION_READY_STATUSES.has(input.run.status)) return "the run is not approved or token-ready yet.";
+  if (input.run.approval_request && input.run.approval_request.status !== "approved") {
+    return "the approval request is not approved yet.";
+  }
+  if (!input.isClaudeImportedRun) {
+    const source = input.resolvedSourceType ?? input.run.source;
+    return `this run resolved to ${source}, not an imported Claude skill, command, or subagent.`;
+  }
+
+  return null;
 }
