@@ -5,6 +5,9 @@ export type ExecutionTokenSummary = {
   skill_run_id: string;
   scopes: string[];
   ttl_seconds: number;
+  token_type: "agentgate_bearer";
+  token_value_available: boolean;
+  token_value?: string;
   status: ExecutionTokenStatus;
   expires_at: string;
 };

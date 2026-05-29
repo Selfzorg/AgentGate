@@ -44,6 +44,9 @@ export type AgentGateExecutionToken = {
   approval_id: string | null;
   scopes: string[];
   ttl_seconds: number;
+  token_type: "agentgate_bearer";
+  token_value_available: boolean;
+  token_value?: string;
   status: string;
   expires_at: string;
 };
@@ -117,14 +120,15 @@ export async function issueExecutionToken(
 
 export async function executeRun(
   runId: string,
-  input: { executionTokenId?: string | undefined; idempotencyKey: string },
+  input: { executionTokenId?: string | undefined; executionToken?: string | undefined; idempotencyKey: string },
   config = configFromEnv()
 ): Promise<AgentGateExecutionQueueResult> {
   return requestJson(config, `/api/v1/skill-runs/${encodeURIComponent(runId)}/execute`, {
     method: "POST",
     body: {
       idempotency_key: input.idempotencyKey,
-      ...(input.executionTokenId ? { execution_token_id: input.executionTokenId } : {})
+      ...(input.executionTokenId ? { execution_token_id: input.executionTokenId } : {}),
+      ...(input.executionToken ? { execution_token: input.executionToken } : {})
     }
   });
 }

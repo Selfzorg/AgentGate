@@ -103,13 +103,14 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
     });
 
     const normalized = normalizeExecutionResult(run.id, skillId, connectorName, result);
+    const attemptResult = mergeAttemptResult(attempt?.result, normalized);
 
     if (attempt) {
       await prisma.skillRunAttempt.update({
         where: { id: attempt.id },
         data: {
           status: "completed",
-          result: normalized as Prisma.InputJsonValue,
+          result: attemptResult as Prisma.InputJsonValue,
           completedAt: new Date()
         }
       });
@@ -322,6 +323,14 @@ function normalizeExecutionResult(
     status: result.status,
     summary: result.summary,
     metadata: result.metadata ?? {}
+  };
+}
+
+function mergeAttemptResult(existing: unknown, result: ReturnType<typeof normalizeExecutionResult>) {
+  const base = existing && typeof existing === "object" && !Array.isArray(existing) ? (existing as Record<string, unknown>) : {};
+  return {
+    ...base,
+    execution_result: result
   };
 }
 

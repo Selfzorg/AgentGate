@@ -34,6 +34,8 @@ export function ExecutionConsole({ runId }: { runId: string }) {
       approval_id: current.approval_request_id,
       scopes: Array.isArray(current.scopes) ? current.scopes.filter((scope): scope is string => typeof scope === "string") : [],
       ttl_seconds: Math.max(0, Math.round((new Date(current.expires_at).getTime() - Date.now()) / 1000)),
+      token_type: "agentgate_bearer",
+      token_value_available: false,
       status: current.status,
       expires_at: current.expires_at
     } satisfies ExecutionTokenSummary;
@@ -241,6 +243,8 @@ function summaryFromRun(run: SkillRunDetailResponse["skill_run"]): ExecutionToke
     approval_id: current.approval_request_id,
     scopes: Array.isArray(current.scopes) ? current.scopes.filter((scope): scope is string => typeof scope === "string") : [],
     ttl_seconds: Math.max(0, Math.round((new Date(current.expires_at).getTime() - Date.now()) / 1000)),
+    token_type: "agentgate_bearer",
+    token_value_available: false,
     status: current.status,
     expires_at: current.expires_at
   };

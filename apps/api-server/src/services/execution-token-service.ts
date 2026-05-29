@@ -11,6 +11,7 @@ export type IssueExecutionTokenInput = {
   approvalId?: string | undefined;
   requestedBy?: string | undefined;
   ttlSeconds?: number | undefined;
+  includeTokenValue?: boolean | undefined;
 };
 
 type SkillVersionLike = {
@@ -176,19 +177,22 @@ export async function issueExecutionToken(prisma: PrismaClient, input: IssueExec
     return {
       status: 201 as const,
       body: {
-        execution_token: serializeExecutionToken(token, scopes, ttlSeconds)
+        execution_token: serializeExecutionToken(token, scopes, ttlSeconds, input.includeTokenValue === true ? rawToken : undefined)
       }
     };
   });
 }
 
-function serializeExecutionToken(token: ExecutionToken, scopes: string[], ttlSeconds: number) {
+function serializeExecutionToken(token: ExecutionToken, scopes: string[], ttlSeconds: number, rawToken?: string) {
   return {
     execution_token_id: token.id,
     skill_run_id: token.skillRunId,
     approval_id: token.approvalRequestId,
     scopes,
     ttl_seconds: ttlSeconds,
+    token_type: "agentgate_bearer",
+    token_value_available: Boolean(rawToken),
+    ...(rawToken ? { token_value: rawToken } : {}),
     status: token.status,
     expires_at: token.expiresAt.toISOString()
   };

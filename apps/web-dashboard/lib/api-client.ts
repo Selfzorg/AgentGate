@@ -358,6 +358,9 @@ export type ExecutionTokenSummary = {
   approval_id: string | null;
   scopes: string[];
   ttl_seconds: number;
+  token_type: "agentgate_bearer";
+  token_value_available: boolean;
+  token_value?: string;
   status: "issued" | "used" | "expired" | "revoked";
   expires_at: string;
 };
@@ -841,6 +844,7 @@ export async function executeSkillRun(
   runId: string,
   input: {
     execution_token_id?: string;
+    execution_token?: string;
     idempotency_key: string;
   }
 ): Promise<ExecuteSkillRunResponse> {

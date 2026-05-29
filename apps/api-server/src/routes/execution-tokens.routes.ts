@@ -6,7 +6,8 @@ const issueTokenBodySchema = z.object({
   skill_run_id: z.string().min(1),
   approval_id: z.string().min(1).optional(),
   requested_by: z.string().min(1).optional(),
-  ttl_seconds: z.number().int().positive().optional()
+  ttl_seconds: z.number().int().positive().optional(),
+  include_token_value: z.boolean().optional()
 });
 
 export const registerExecutionTokenRoutes: FastifyPluginAsync = async (app) => {
@@ -16,7 +17,8 @@ export const registerExecutionTokenRoutes: FastifyPluginAsync = async (app) => {
       skillRunId: body.skill_run_id,
       approvalId: body.approval_id,
       requestedBy: body.requested_by,
-      ttlSeconds: body.ttl_seconds
+      ttlSeconds: body.ttl_seconds,
+      includeTokenValue: body.include_token_value
     });
 
     return reply.code(result.status).send(result.body);

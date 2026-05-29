@@ -10,6 +10,7 @@ const runParamsSchema = z.object({
 
 const executeBodySchema = z.object({
   execution_token_id: z.string().optional(),
+  execution_token: z.string().min(1).optional(),
   idempotency_key: z.string().min(1)
 });
 
@@ -189,6 +190,7 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
     const result = await queueSkillRunExecution(app.services.prisma, {
       runId,
       executionTokenId: body.execution_token_id,
+      executionToken: body.execution_token,
       idempotencyKey: body.idempotency_key,
       requestedBy: "agentgate-ui"
     });
@@ -202,6 +204,7 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
     const result = await queueSkillRunExecution(app.services.prisma, {
       runId,
       executionTokenId: body.execution_token_id,
+      executionToken: body.execution_token,
       idempotencyKey: body.idempotency_key,
       requestedBy: "agentgate-ui",
       allowRetry: true

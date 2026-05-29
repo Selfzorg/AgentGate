@@ -1,12 +1,14 @@
 import { Prisma, type ExecutionToken, type PrismaClient } from "@prisma/client";
 import { emitAuditEvent } from "./audit-event-service";
+import { buildExecutionEnvelope } from "./execution-envelope-service";
 import { createId } from "./id";
-import { executionTokenRequired, scopesForSkill } from "./execution-token-service";
+import { executionTokenRequired, hashExecutionToken, scopesForSkill } from "./execution-token-service";
 import { resolvedSkillId } from "./object-utils";
 
 export type QueueExecutionInput = {
   runId: string;
   executionTokenId?: string | undefined;
+  executionToken?: string | undefined;
   idempotencyKey: string;
   requestedBy?: string | undefined;
   allowRetry?: boolean | undefined;
@@ -17,6 +19,7 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
     const run = await tx.skillRun.findUnique({
       where: { id: input.runId },
       include: {
+        agent: true,
         approvalRequest: true,
         skill: {
           include: {
@@ -75,15 +78,17 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
     const skillId = run.skill?.skillId ?? resolvedSkillId(run.resolvedSkillSnapshot);
     const tokenRequired = executionTokenRequired(run);
     let executionToken: ExecutionToken | null = null;
+    let credentialMode: "bearer" | "legacy_token_id" | "not_required" = "not_required";
 
     if (tokenRequired) {
-      if (!input.executionTokenId) {
+      if (!input.executionToken && !input.executionTokenId) {
         await emitCredentialRejected(tx, run, "Execution token is required");
         return { status: 403 as const, body: { error: "Execution rejected because execution token is required" } };
       }
 
       const validation = await validateExecutionToken(tx, {
         tokenId: input.executionTokenId,
+        rawToken: input.executionToken,
         runId: run.id,
         approvalId: run.approvalRequest?.id ?? null,
         environment: run.environment,
@@ -96,10 +101,20 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
       }
 
       executionToken = validation.token;
+      credentialMode = input.executionToken ? "bearer" : "legacy_token_id";
     } else if (input.executionTokenId) {
       executionToken = await tx.executionToken.findUnique({
         where: { id: input.executionTokenId }
       });
+      credentialMode = executionToken ? "legacy_token_id" : "not_required";
+    } else if (input.executionToken) {
+      executionToken = await tx.executionToken.findFirst({
+        where: {
+          skillRunId: run.id,
+          tokenHash: hashExecutionToken(input.executionToken)
+        }
+      });
+      credentialMode = executionToken ? "bearer" : "not_required";
     }
 
     if (executionToken) {
@@ -123,6 +138,14 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
       }
     }
 
+    const executionEnvelope = buildExecutionEnvelope({
+      run,
+      skillId,
+      executionToken,
+      idempotencyKey: input.idempotencyKey,
+      credentialMode
+    });
+
     const attempt = await tx.skillRunAttempt.create({
       data: {
         id: createId("attempt"),
@@ -131,7 +154,10 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
         skillRunId: run.id,
         executionTokenId: executionToken?.id ?? null,
         idempotencyKey: input.idempotencyKey,
-        status: "queued"
+        status: "queued",
+        result: {
+          execution_envelope: executionEnvelope
+        } as Prisma.InputJsonValue
       }
     });
 
@@ -152,7 +178,9 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
         metadata: {
           attempt_id: attempt.id,
           idempotency_key: input.idempotencyKey,
-          execution_token_id: executionToken?.id ?? null
+          execution_token_id: executionToken?.id ?? null,
+          credential_mode: credentialMode,
+          execution_envelope: executionEnvelope
         }
       });
     }
@@ -169,7 +197,9 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
         attempt_id: attempt.id,
         idempotency_key: input.idempotencyKey,
         execution_token_id: executionToken?.id ?? null,
-        token_status: executionToken ? "used" : "not_required"
+        credential_mode: credentialMode,
+        token_status: executionToken ? "used" : "not_required",
+        execution_envelope: executionEnvelope
       }
     });
 
@@ -188,18 +218,29 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
 async function validateExecutionToken(
   prisma: Prisma.TransactionClient,
   input: {
-    tokenId: string;
+    tokenId?: string | undefined;
+    rawToken?: string | undefined;
     runId: string;
     approvalId: string | null;
     environment: string | null;
     requiredScopes: string[];
   }
 ): Promise<{ valid: true; token: ExecutionToken } | { valid: false; reason: string }> {
-  const token = await prisma.executionToken.findUnique({
-    where: { id: input.tokenId }
-  });
+  const token = input.rawToken
+    ? await prisma.executionToken.findFirst({
+        where: {
+          skillRunId: input.runId,
+          tokenHash: hashExecutionToken(input.rawToken)
+        }
+      })
+    : input.tokenId
+      ? await prisma.executionToken.findUnique({
+          where: { id: input.tokenId }
+        })
+      : null;
 
   if (!token) return { valid: false, reason: "Execution token not found" };
+  if (input.tokenId && token.id !== input.tokenId) return { valid: false, reason: "Execution token credential mismatch" };
   if (token.skillRunId !== input.runId) return { valid: false, reason: "Execution token does not match skill run" };
   if (token.approvalRequestId !== input.approvalId) {
     return { valid: false, reason: "Execution token does not match approval request" };
