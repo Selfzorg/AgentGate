@@ -5,6 +5,7 @@ import { dbDemoConnector } from "../connectors/db-demo-connector";
 import { deploymentDemoConnector } from "../connectors/deployment-demo-connector";
 import { githubDemoConnector } from "../connectors/github-demo-connector";
 import { appendExecutionLog } from "../logs/append-execution-log";
+import { validateExecutionControls } from "./execution-controls";
 
 export async function executeSkillRun(prisma: PrismaClient, runId: string) {
   const run = await prisma.skillRun.findUnique({
@@ -63,6 +64,20 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
   });
 
   try {
+    const controls = validateExecutionControls({
+      skillId,
+      connectorName,
+      environment: run.environment,
+      token
+    });
+    if (!controls.allowed) {
+      return markRunFailed(prisma, run, attempt?.id ?? null, {
+        status: "failed",
+        summary: controls.reason,
+        metadata: controls.metadata
+      });
+    }
+
     for (const log of plannedLogs(run.rawAction, skillId, connectorName, scopes)) {
       await appendLogAndAudit(prisma, run, log.level, log.message, log.metadata);
     }
