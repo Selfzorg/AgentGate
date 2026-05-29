@@ -6,7 +6,13 @@ import type {
 } from "./types";
 
 const readOnlyToolPatterns = [/^read\b/i, /^grep\b/i, /^glob\b/i, /^ls\b/i, /^bash\(?(git status|git show|rg|ls|pwd|cat)\b/i];
-const mutatingToolPatterns = [/write/i, /edit/i, /multiedit/i, /bash/i, /mcp__.*__(merge|deploy|apply|create|delete|drop)/i];
+const mutatingToolPatterns = [
+  /write/i,
+  /edit/i,
+  /multiedit/i,
+  /bash/i,
+  /mcp(__|\.|:).*(merge|deploy|apply|create|delete|drop|truncate|migrate)/i
+];
 const highRiskTextPatterns = [/\bprod(?:uction)?\b/i, /\bdeploy\b/i, /\bmerge\b/i, /\bmigrate\b/i, /\bpush\b/i];
 const criticalTextPatterns = [/\bdrop\b/i, /\btruncate\b/i, /\bdestroy\b/i, /\bdelete\b/i, /\bforce\b/i];
 const evidenceTextPatterns = [/\bevidence\b/i, /\bverify\b/i, /\bcheck\b/i, /\bread[- ]only\b/i, /\bstatus\b/i];
@@ -72,6 +78,8 @@ function sideEffectLevelFor(input: {
 }): SkillRegistrySideEffectLevel {
   if (input.hasCriticalText || input.hasHighRiskText || input.hasMutatingTools) return "mutating";
   if (input.hasReadOnlyTools) return "read_only";
+  if (input.sourceType === "mcp_tool" || input.sourceType === "native_connector") return "mutating";
+  if (input.sourceType === "demo_fixture") return "simulated";
   if (input.sourceType === "codex_skill") return "simulated";
   return "read_only";
 }

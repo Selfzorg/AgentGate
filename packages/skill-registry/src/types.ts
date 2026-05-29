@@ -1,4 +1,10 @@
-export type SkillRegistrySourceType = "codex_skill" | "claude_command" | "claude_subagent";
+export type SkillRegistrySourceType =
+  | "codex_skill"
+  | "claude_command"
+  | "claude_subagent"
+  | "mcp_tool"
+  | "native_connector"
+  | "demo_fixture";
 export type SkillRegistryScope = "repo" | "user";
 export type SkillRegistrySkillType = "evidence" | "execution";
 export type SkillRegistrySideEffectLevel = "read_only" | "simulated" | "mutating";
@@ -8,6 +14,8 @@ export type SkillRegistryRuntime =
   | "codex_mcp"
   | "claude_cli"
   | "claude_code_mcp"
+  | "mcp_tool"
+  | "native_connector"
   | "local_deterministic";
 
 export type SkillRegistryCandidate = {
@@ -30,6 +38,19 @@ export type SkillRegistryCandidate = {
   metadata: Record<string, unknown>;
 };
 
+export type SkillRegistryDuplicateGroup = {
+  normalizedName: string;
+  candidates: Array<{
+    id: string;
+    skillId: string;
+    name: string;
+    sourceType: SkillRegistrySourceType;
+    scope: SkillRegistryScope;
+    relativePath: string;
+    contentHash: string;
+  }>;
+};
+
 export type ScanAgentSkillsInput = {
   rootDir: string;
   includeUserScopes?: boolean | undefined;
@@ -43,6 +64,14 @@ export type ScanAgentSkillsResult = {
   scannedAt: string;
   candidates: SkillRegistryCandidate[];
   warnings: string[];
+  duplicateGroups: SkillRegistryDuplicateGroup[];
+  summary: {
+    total: number;
+    bySourceType: Record<string, number>;
+    byRiskLevel: Record<string, number>;
+    bySideEffectLevel: Record<string, number>;
+    warningCount: number;
+  };
 };
 
 export type ParsedMarkdown = {

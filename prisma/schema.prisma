@@ -137,6 +137,20 @@ enum EvidenceWorkerStatus {
   error
 }
 
+enum SkillImportBatchStatus {
+  pending
+  approved
+  rejected
+}
+
+enum SkillImportCandidateStatus {
+  pending
+  imported
+  skipped
+  rejected
+  failed
+}
+
 model Tenant {
   id        String       @id
   name      String
@@ -144,26 +158,28 @@ model Tenant {
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
 
-  workspaces       Workspace[]
-  users            User[]
-  agents           Agent[]
-  skills           Skill[]
-  skillVersions    SkillVersion[]
-  policies         Policy[]
-  policyVersions   PolicyVersion[]
-  connectors       Connector[]
-  skillRuns        SkillRun[]
-  gateCheckResults GateCheckResult[]
-  approvalRequests ApprovalRequest[]
-  executionTokens  ExecutionToken[]
-  executionLogs    ExecutionLog[]
-  dryRunResults    DryRunResult[]
-  auditEvents      AuditEvent[]
-  auditArtifacts   AuditArtifact[]
-  skillRunAttempts SkillRunAttempt[]
-  aiRunAnalyses    AiRunAnalysis[]
-  evidenceTasks    EvidenceTask[]
-  evidenceWorkers  EvidenceWorker[]
+  workspaces            Workspace[]
+  users                 User[]
+  agents                Agent[]
+  skills                Skill[]
+  skillVersions         SkillVersion[]
+  policies              Policy[]
+  policyVersions        PolicyVersion[]
+  connectors            Connector[]
+  skillRuns             SkillRun[]
+  gateCheckResults      GateCheckResult[]
+  approvalRequests      ApprovalRequest[]
+  executionTokens       ExecutionToken[]
+  executionLogs         ExecutionLog[]
+  dryRunResults         DryRunResult[]
+  auditEvents           AuditEvent[]
+  auditArtifacts        AuditArtifact[]
+  skillRunAttempts      SkillRunAttempt[]
+  aiRunAnalyses         AiRunAnalysis[]
+  evidenceTasks         EvidenceTask[]
+  evidenceWorkers       EvidenceWorker[]
+  skillImportBatches    SkillImportBatch[]
+  skillImportCandidates SkillImportCandidate[]
 
   @@map("tenants")
 }
@@ -177,25 +193,27 @@ model Workspace {
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
 
-  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  agents           Agent[]
-  skills           Skill[]
-  skillVersions    SkillVersion[]
-  policies         Policy[]
-  policyVersions   PolicyVersion[]
-  connectors       Connector[]
-  skillRuns        SkillRun[]
-  gateCheckResults GateCheckResult[]
-  approvalRequests ApprovalRequest[]
-  executionTokens  ExecutionToken[]
-  executionLogs    ExecutionLog[]
-  dryRunResults    DryRunResult[]
-  auditEvents      AuditEvent[]
-  auditArtifacts   AuditArtifact[]
-  skillRunAttempts SkillRunAttempt[]
-  aiRunAnalyses    AiRunAnalysis[]
-  evidenceTasks    EvidenceTask[]
-  evidenceWorkers  EvidenceWorker[]
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agents                Agent[]
+  skills                Skill[]
+  skillVersions         SkillVersion[]
+  policies              Policy[]
+  policyVersions        PolicyVersion[]
+  connectors            Connector[]
+  skillRuns             SkillRun[]
+  gateCheckResults      GateCheckResult[]
+  approvalRequests      ApprovalRequest[]
+  executionTokens       ExecutionToken[]
+  executionLogs         ExecutionLog[]
+  dryRunResults         DryRunResult[]
+  auditEvents           AuditEvent[]
+  auditArtifacts        AuditArtifact[]
+  skillRunAttempts      SkillRunAttempt[]
+  aiRunAnalyses         AiRunAnalysis[]
+  evidenceTasks         EvidenceTask[]
+  evidenceWorkers       EvidenceWorker[]
+  skillImportBatches    SkillImportBatch[]
+  skillImportCandidates SkillImportCandidate[]
 
   @@unique([tenantId, key])
   @@index([tenantId])
@@ -261,10 +279,11 @@ model Skill {
   createdAt        DateTime     @default(now()) @map("created_at")
   updatedAt        DateTime     @updatedAt @map("updated_at")
 
-  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  versions  SkillVersion[]
-  skillRuns SkillRun[]
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace        Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions         SkillVersion[]
+  skillRuns        SkillRun[]
+  importCandidates SkillImportCandidate[]
 
   @@unique([tenantId, workspaceId, skillId])
   @@index([tenantId, workspaceId, category])
@@ -284,15 +303,84 @@ model SkillVersion {
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  skill     Skill      @relation(fields: [skillRecordId], references: [id], onDelete: Cascade)
-  connector Connector? @relation(fields: [connectorId], references: [id], onDelete: SetNull)
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace        Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  skill            Skill                  @relation(fields: [skillRecordId], references: [id], onDelete: Cascade)
+  connector        Connector?             @relation(fields: [connectorId], references: [id], onDelete: SetNull)
+  importCandidates SkillImportCandidate[]
 
   @@unique([skillRecordId, version])
   @@index([tenantId, workspaceId])
   @@index([connectorId])
   @@map("skill_versions")
+}
+
+model SkillImportBatch {
+  id             String                 @id
+  tenantId       String                 @map("tenant_id")
+  workspaceId    String                 @map("workspace_id")
+  rootDir        String                 @map("root_dir")
+  status         SkillImportBatchStatus @default(pending)
+  candidateCount Int                    @default(0) @map("candidate_count")
+  warningCount   Int                    @default(0) @map("warning_count")
+  scanConfig     Json                   @default("{}") @map("scan_config")
+  warnings       Json                   @default("[]")
+  requestedBy    String?                @map("requested_by")
+  reviewedBy     String?                @map("reviewed_by")
+  reviewComment  String?                @map("review_comment")
+  reviewedAt     DateTime?              @map("reviewed_at")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+
+  tenant     Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace  Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  candidates SkillImportCandidate[]
+
+  @@index([tenantId, workspaceId, status, createdAt])
+  @@map("skill_import_batches")
+}
+
+model SkillImportCandidate {
+  id                     String                     @id
+  tenantId               String                     @map("tenant_id")
+  workspaceId            String                     @map("workspace_id")
+  batchId                String                     @map("batch_id")
+  candidateId            String                     @map("candidate_id")
+  skillId                String                     @map("skill_id")
+  name                   String
+  description            String?
+  sourceType             String                     @map("source_type")
+  sourcePath             String                     @map("source_path")
+  relativePath           String                     @map("relative_path")
+  scope                  String
+  contentHash            String                     @map("content_hash")
+  declaredTools          Json                       @default("[]") @map("declared_tools")
+  skillType              String                     @map("skill_type")
+  sideEffectLevel        String                     @map("side_effect_level")
+  defaultRiskLevel       RiskLevel                  @map("default_risk_level")
+  allowedRuntimes        Json                       @default("[]") @map("allowed_runtimes")
+  preferredRuntimes      Json                       @default("[]") @map("preferred_runtimes")
+  warnings               Json                       @default("[]")
+  metadata               Json                       @default("{}")
+  reviewStatus           SkillImportCandidateStatus @default(pending) @map("review_status")
+  importedSkillRecordId  String?                    @map("imported_skill_record_id")
+  importedSkillVersionId String?                    @map("imported_skill_version_id")
+  reviewNotes            Json                       @default("{}") @map("review_notes")
+  createdAt              DateTime                   @default(now()) @map("created_at")
+  updatedAt              DateTime                   @updatedAt @map("updated_at")
+
+  tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace            Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  batch                SkillImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  importedSkill        Skill?           @relation(fields: [importedSkillRecordId], references: [id], onDelete: SetNull)
+  importedSkillVersion SkillVersion?    @relation(fields: [importedSkillVersionId], references: [id], onDelete: SetNull)
+
+  @@unique([batchId, candidateId])
+  @@index([tenantId, workspaceId, reviewStatus])
+  @@index([tenantId, workspaceId, skillId])
+  @@index([importedSkillRecordId])
+  @@index([importedSkillVersionId])
+  @@map("skill_import_candidates")
 }
 
 model Policy {

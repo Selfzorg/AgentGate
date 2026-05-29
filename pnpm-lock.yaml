@@ -15,6 +15,9 @@ importers:
       '@agentgate/ai-provider':
         specifier: workspace:*
         version: link:packages/ai-provider
+      '@agentgate/cli':
+        specifier: workspace:*
+        version: link:apps/agentgate-cli
       '@agentgate/config-loader':
         specifier: workspace:*
         version: link:packages/config-loader
@@ -54,6 +57,16 @@ importers:
       vitest:
         specifier: ^2.1.5
         version: 2.1.9(@types/node@22.19.19)
+
+  apps/agentgate-cli:
+    dependencies:
+      '@agentgate/skill-registry':
+        specifier: workspace:*
+        version: link:../../packages/skill-registry
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.3
 
   apps/api-server:
     dependencies:

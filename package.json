@@ -3,8 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "agentgate": "./bin/agentgate.js"
+  },
   "packageManager": "pnpm@11.3.0",
   "scripts": {
+    "agentgate": "tsx apps/agentgate-cli/src/index.ts",
     "dev": "pnpm --parallel --filter @agentgate/api-server --filter @agentgate/web-dashboard dev",
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
@@ -36,6 +40,7 @@
   },
   "devDependencies": {
     "@agentgate/config-loader": "workspace:*",
+    "@agentgate/cli": "workspace:*",
     "@agentgate/ai-provider": "workspace:*",
     "@agentgate/policy-engine": "workspace:*",
     "@agentgate/risk-engine": "workspace:*",
