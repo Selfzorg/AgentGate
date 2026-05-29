@@ -36,11 +36,11 @@ export async function resolveImportedRegistrySkill(
     toolName: input.toolName
   });
   const explicitRegistryHint = hasRegistryHint(input.context);
-  const selected = resolution.selected && isResolutionAllowedForSource(resolution.selected, input.source, explicitRegistryHint)
+  const selected = resolution.selected && isResolutionAllowedForSource(resolution.selected, input.source, explicitRegistryHint, input.context)
     ? withVersionMetadata(resolution.selected, candidates)
     : null;
   const alternatives = resolution.alternatives.flatMap((match) => {
-    if (!isResolutionAllowedForSource(match, input.source, explicitRegistryHint)) return [];
+    if (!isResolutionAllowedForSource(match, input.source, explicitRegistryHint, input.context)) return [];
     const enriched = withVersionMetadata(match, candidates);
     return enriched ? [enriched] : [];
   });
@@ -230,15 +230,44 @@ function recordFrom(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-function isResolutionAllowedForSource(match: RegistryResolutionMatch, source: string | undefined, explicitRegistryHint: boolean) {
+function isResolutionAllowedForSource(
+  match: RegistryResolutionMatch,
+  source: string | undefined,
+  explicitRegistryHint: boolean,
+  context: Record<string, unknown> | undefined
+) {
   if (explicitRegistryHint) return true;
   if (source === "claude-code" || source === "claude_code") {
-    return match.candidate.sourceType === "claude_skill" || match.candidate.sourceType === "claude_command" || match.candidate.sourceType === "claude_subagent";
+    if (!isClaudeSourceType(match.candidate.sourceType)) return false;
+    return isExplicitAgentSkillMatch(match) || isContextualAgentSkillBridgeAllowed(match, context);
   }
   if (source === "codex") return match.candidate.sourceType === "codex_skill";
-  if (source === "mcp_proxy") return match.candidate.sourceType === "mcp_tool" || match.candidate.sourceType === "native_connector";
+  if (source === "mcp_proxy") {
+    if (match.candidate.sourceType === "mcp_tool" || match.candidate.sourceType === "native_connector") return true;
+    return isContextualAgentSkillBridgeAllowed(match, context);
+  }
   if (source === "demo_harness") return match.candidate.sourceType === "demo_fixture";
   return true;
+}
+
+function isContextualAgentSkillBridgeAllowed(match: RegistryResolutionMatch, context: Record<string, unknown> | undefined) {
+  if (!isClaudeSourceType(match.candidate.sourceType)) return false;
+  if (match.confidence < 0.85) return false;
+
+  const serviceTokens = tokensFor(stringFrom(context?.service) ?? "");
+  if (serviceTokens.length === 0) return false;
+
+  const candidateTokens = new Set(tokensFor([match.candidate.relativePath, match.candidate.name].join(" ")));
+  return serviceTokens.every((token) => candidateTokens.has(token));
+}
+
+function isExplicitAgentSkillMatch(match: RegistryResolutionMatch) {
+  if (match.matchedField === "skill_id" || match.matchedField === "path") return true;
+  return match.matchedField === "name" && match.confidence >= 0.9;
+}
+
+function isClaudeSourceType(sourceType: string) {
+  return sourceType === "claude_skill" || sourceType === "claude_command" || sourceType === "claude_subagent";
 }
 
 function registryHintFromContext(context: Record<string, unknown> | undefined) {
@@ -256,4 +285,12 @@ function registryHintFromContext(context: Record<string, unknown> | undefined) {
 
 function hasRegistryHint(context: Record<string, unknown> | undefined) {
   return Boolean(registryHintFromContext(context));
+}
+
+function tokensFor(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
 }

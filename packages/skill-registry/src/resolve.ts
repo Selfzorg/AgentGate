@@ -18,7 +18,7 @@ export type RegistryResolutionResult = {
 };
 
 export function resolveRegistryCandidate(input: RegistryResolutionInput): RegistryResolutionResult {
-  const haystack = normalize([input.rawAction, input.toolName].filter(Boolean).join(" "));
+  const haystack = normalize([input.rawAction, input.toolName].filter(Boolean).join(" agentgateboundary "));
   const haystackTokens = tokensFor(haystack);
   if (!haystack) {
     return {

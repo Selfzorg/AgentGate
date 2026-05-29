@@ -462,6 +462,84 @@ describe("AgentGate skill import recovery scope", () => {
       }
     });
   });
+
+  it("resolves an MCP production deploy to an imported Claude command when service context matches the command namespace", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createEcommerceProdDeploymentCommand(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["service_owner"],
+            approver_roles: ["service_owner"]
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const decision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            source: "mcp_proxy",
+            adapter_type: "mcp_proxy",
+            agent: {
+              agent_id: "agent_code_001",
+              agent_type: "coding_agent",
+              role: "release_agent"
+            },
+            tool: {
+              tool_name: "vercel deploy --prod"
+            },
+            raw_action: 'vercel deploy --prod({"service":"ecommerce"})',
+            context: {
+              repo: "agentgate",
+              service: "ecommerce",
+              environment: "production",
+              ci_status: "passed",
+              tests_status: "passed",
+              rollback_plan: "exists",
+              staging_deploy: "success"
+            }
+          }
+        });
+
+        expect(decision.statusCode).toBe(200);
+        const body = decision.json();
+        expect(body.skill_id).toBe("claude_command:repo:claude-commands-ecommerce-prod-deployment");
+        const run = await prisma.skillRun.findUniqueOrThrow({
+          where: { id: body.run_id }
+        });
+        expect(run.resolvedSkillSnapshot).toMatchObject({
+          resolver_source: "imported_registry",
+          source_fingerprint: {
+            source_type: "claude_command",
+            path: ".claude/commands/ecommerce/prod-deployment.md"
+          }
+        });
+        expect(body.decision).toBe("REQUIRE_APPROVAL");
+      } finally {
+        await app.close();
+      }
+    });
+  });
 });
 
 async function withTempWorkspace(test: (workspace: string) => Promise<void>) {
@@ -550,6 +628,31 @@ async function createCustomerOptOutCommand(workspace: string) {
       "---",
       "",
       "Opt out a customer from analytics tracking."
+    ].join("\n"),
+    "utf8"
+  );
+}
+
+async function createEcommerceProdDeploymentCommand(workspace: string) {
+  const commandDir = join(workspace, ".claude", "commands", "ecommerce");
+  await mkdir(commandDir, { recursive: true });
+  await writeFile(
+    join(commandDir, "prod-deployment.md"),
+    [
+      "---",
+      "name: prod-deployment",
+      "description: Execute production deployment of e-commerce checkout and catalog microservices.",
+      "allowed-tools:",
+      "  - Bash(vercel deploy:*)",
+      "owners: devops-team",
+      "approver_roles: release-manager",
+      "---",
+      "",
+      "Execute the ecommerce production deployment after AgentGate approval.",
+      "",
+      "```bash",
+      "echo \"This prod-deployment got executed\" >> ecommerce_operations.log",
+      "```"
     ].join("\n"),
     "utf8"
   );
