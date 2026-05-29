@@ -1,6 +1,7 @@
 export const fetchPolyfillScript = String.raw`
 (function () {
-  if (typeof window === "undefined" || typeof window.fetch === "function") return;
+  if (typeof window === "undefined") return;
+  var nativeFetch = typeof window.fetch === "function" ? window.fetch.bind(window) : null;
 
   function HeadersShim(rawHeaders) {
     this.rawHeaders = rawHeaders || "";
@@ -8,7 +9,7 @@ export const fetchPolyfillScript = String.raw`
 
   HeadersShim.prototype.get = function (name) {
     var lowerName = String(name).toLowerCase();
-    var lines = this.rawHeaders.split(/\r?\n/);
+    var lines = this.rawHeaders.split(String.fromCharCode(10));
     for (var index = 0; index < lines.length; index += 1) {
       var line = lines[index];
       var separator = line.indexOf(":");
@@ -39,9 +40,17 @@ export const fetchPolyfillScript = String.raw`
     });
   }
 
-  window.fetch = function (input, init) {
+  function requestUrl(input) {
+    return typeof input === "string" ? input : input && input.url;
+  }
+
+  function shouldUseXhr(url) {
+    return !nativeFetch || String(url).indexOf("/api/v1/") !== -1;
+  }
+
+  function xhrFetch(input, init) {
     var requestInit = init || {};
-    var url = typeof input === "string" ? input : input && input.url;
+    var url = requestUrl(input);
     return new Promise(function (resolve, reject) {
       if (!url) {
         reject(new TypeError("fetch polyfill requires a URL"));
@@ -80,6 +89,13 @@ export const fetchPolyfillScript = String.raw`
       }
       xhr.send(requestInit.body || null);
     });
+  }
+
+  window.fetch = function (input, init) {
+    var url = requestUrl(input);
+    if (url && shouldUseXhr(url)) return xhrFetch(input, init);
+    if (nativeFetch) return nativeFetch(input, init);
+    return xhrFetch(input, init);
   };
 })();
 `;
