@@ -1,28 +1,60 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ClipboardCheck, Loader2, Search } from "lucide-react";
+import { ClipboardCheck, Loader2, RefreshCw, Search, Wand2 } from "lucide-react";
 import {
+  getSkills,
   getRiskScannerSamples,
   simulateRisk,
+  type SkillRecord,
   type RiskScannerSample,
   type RiskScannerSimulation
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import {
+  buildSkillSimulationPayload,
+  defaultEnvironmentFor,
+  defaultRawActionForSkill,
+  isImportedSkill,
+  isSkillCompatibleWithSource,
+  sourceTypeForSkill,
+  type SimulationEnvironment,
+  type SimulationPolicyMode,
+  type SimulationSource
+} from "./payload-builder";
 
 export function RiskScannerPanel() {
   const [samples, setSamples] = useState<RiskScannerSample[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [payloadText, setPayloadText] = useState("");
+  const [skills, setSkills] = useState<SkillRecord[]>([]);
+  const [selectedSkillId, setSelectedSkillId] = useState("");
+  const [simulationSource, setSimulationSource] = useState<SimulationSource>("claude-code");
+  const [environment, setEnvironment] = useState<SimulationEnvironment>("production");
+  const [policyMode, setPolicyMode] = useState<SimulationPolicyMode>("enforce");
+  const [rawAction, setRawAction] = useState("");
   const [simulation, setSimulation] = useState<RiskScannerSimulation | null>(null);
   const [status, setStatus] = useState("Loading samples...");
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [skillLoadState, setSkillLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [isSimulating, setIsSimulating] = useState(false);
 
   const selectedSample = useMemo(
     () => samples.find((sample) => sample.id === selectedId) ?? null,
     [samples, selectedId]
+  );
+  const importedSkills = useMemo(
+    () => skills.filter((skill) => skill.status === "active" && skill.version_status === "active" && isImportedSkill(skill)),
+    [skills]
+  );
+  const compatibleSkills = useMemo(
+    () => importedSkills.filter((skill) => isSkillCompatibleWithSource(skill, simulationSource)),
+    [importedSkills, simulationSource]
+  );
+  const selectedSkill = useMemo(
+    () => compatibleSkills.find((skill) => skill.id === selectedSkillId) ?? compatibleSkills[0] ?? null,
+    [compatibleSkills, selectedSkillId]
   );
 
   useEffect(() => {
@@ -41,13 +73,63 @@ export function RiskScannerPanel() {
         setStatus("API unavailable");
         setLoadState("error");
       });
+    void loadImportedSkills();
   }, []);
+
+  useEffect(() => {
+    const first = compatibleSkills[0];
+    if (!first) {
+      setSelectedSkillId("");
+      setRawAction("");
+      return;
+    }
+    const nextSkill = compatibleSkills.some((skill) => skill.id === selectedSkillId) ? selectedSkill : first;
+    if (nextSkill && nextSkill.id !== selectedSkillId) setSelectedSkillId(nextSkill.id);
+    if (nextSkill) {
+      setEnvironment(defaultEnvironmentFor(nextSkill));
+      setRawAction(defaultRawActionForSkill(nextSkill));
+    }
+  }, [compatibleSkills, selectedSkill, selectedSkillId]);
 
   function loadSample(sample: RiskScannerSample) {
     setSelectedId(sample.id);
     setPayloadText(JSON.stringify(sample.payload, null, 2));
     setSimulation(null);
     setStatus("Ready");
+  }
+
+  async function loadImportedSkills() {
+    setSkillLoadState("loading");
+    try {
+      const response = await getSkills();
+      setSkills(response.skills);
+      setSkillLoadState("ready");
+    } catch {
+      setSkillLoadState("error");
+    }
+  }
+
+  function loadSkillPayload() {
+    if (!selectedSkill) {
+      setStatus("No active imported skill for this source.");
+      return;
+    }
+    setSelectedId(null);
+    setSimulation(null);
+    setPayloadText(
+      JSON.stringify(
+        buildSkillSimulationPayload({
+          skill: selectedSkill,
+          source: simulationSource,
+          environment,
+          policyMode,
+          rawAction
+        }),
+        null,
+        2
+      )
+    );
+    setStatus(`Payload built from ${selectedSkill.name}`);
   }
 
   async function runSimulation() {
@@ -107,6 +189,101 @@ export function RiskScannerPanel() {
             </div>
           ) : null}
         </div>
+        <div className="mt-5 border-t border-border pt-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold">Approved Skills</h2>
+              <p className="mt-1 text-xs text-muted">
+                {skillLoadState === "ready" ? `${compatibleSkills.length} available` : skillLoadState === "loading" ? "Loading" : "Unavailable"}
+              </p>
+            </div>
+            <Button variant="ghost" onClick={() => void loadImportedSkills()}>
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+
+          <div className="grid gap-3">
+            <label>
+              <span className="text-xs font-semibold uppercase text-muted">Source</span>
+              <select
+                value={simulationSource}
+                onChange={(event) => setSimulationSource(event.target.value as SimulationSource)}
+                className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-2 text-sm outline-none focus:border-accent"
+              >
+                <option value="claude-code">Claude Code</option>
+                <option value="codex">Codex</option>
+                <option value="mcp_proxy">MCP Proxy</option>
+              </select>
+            </label>
+            <label>
+              <span className="text-xs font-semibold uppercase text-muted">Skill</span>
+              <select
+                value={selectedSkill?.id ?? ""}
+                onChange={(event) => {
+                  const skill = compatibleSkills.find((candidate) => candidate.id === event.target.value) ?? null;
+                  setSelectedSkillId(event.target.value);
+                  if (skill) {
+                    setEnvironment(defaultEnvironmentFor(skill));
+                    setRawAction(defaultRawActionForSkill(skill));
+                  }
+                }}
+                disabled={compatibleSkills.length === 0}
+                className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-2 text-sm outline-none focus:border-accent disabled:text-muted"
+              >
+                {compatibleSkills.length === 0 ? <option value="">No active imported skills</option> : null}
+                {compatibleSkills.map((skill) => (
+                  <option key={skill.id} value={skill.id}>
+                    {skill.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedSkill ? (
+              <div className="flex flex-wrap gap-2">
+                <StatusBadge kind="risk" value={selectedSkill.default_risk_level} />
+                <StatusBadge kind="gate" value={sourceTypeForSkill(selectedSkill) ?? "imported"} />
+              </div>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label>
+                <span className="text-xs font-semibold uppercase text-muted">Environment</span>
+                <select
+                  value={environment}
+                  onChange={(event) => setEnvironment(event.target.value as SimulationEnvironment)}
+                  className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-2 text-sm outline-none focus:border-accent"
+                >
+                  <option value="dev">Dev</option>
+                  <option value="staging">Staging</option>
+                  <option value="production">Production</option>
+                </select>
+              </label>
+              <label>
+                <span className="text-xs font-semibold uppercase text-muted">Mode</span>
+                <select
+                  value={policyMode}
+                  onChange={(event) => setPolicyMode(event.target.value as SimulationPolicyMode)}
+                  className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-2 text-sm outline-none focus:border-accent"
+                >
+                  <option value="enforce">Enforce</option>
+                  <option value="warn">Warn</option>
+                  <option value="observe">Observe</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              <span className="text-xs font-semibold uppercase text-muted">Action</span>
+              <input
+                value={rawAction}
+                onChange={(event) => setRawAction(event.target.value)}
+                className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 text-sm outline-none focus:border-accent"
+              />
+            </label>
+            <Button disabled={!selectedSkill} onClick={loadSkillPayload}>
+              <Wand2 className="h-4 w-4" aria-hidden="true" />
+              Use Skill
+            </Button>
+          </div>
+        </div>
       </section>
 
       <div className="space-y-5">
@@ -137,6 +314,8 @@ export function RiskScannerPanel() {
 }
 
 function SimulationResult({ simulation }: { simulation: RiskScannerSimulation }) {
+  const importedSelection = simulation.registry_resolution.imported_selected;
+
   return (
     <section className="rounded-ui border border-border bg-surface p-5 shadow-panel">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
@@ -171,6 +350,21 @@ function SimulationResult({ simulation }: { simulation: RiskScannerSimulation })
           </div>
         </div>
       </div>
+
+      {importedSelection ? (
+        <div className="mt-5 rounded-ui border border-border bg-background p-4">
+          <div className="text-xs uppercase text-muted">Imported Registry Match</div>
+          <div className="mt-2 text-sm font-semibold">{importedSelection.name}</div>
+          <div className="mt-1 font-mono text-xs text-muted">{importedSelection.skill_id}</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <StatusBadge kind="gate" value={importedSelection.source_type} />
+            <StatusBadge kind="risk" value={importedSelection.default_risk_level} />
+            <span className="rounded-ui border border-border px-2 py-1 font-mono text-xs text-muted">
+              {importedSelection.confidence.toFixed(2)} via {importedSelection.matched_field}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <div className="rounded-ui border border-border bg-background p-4">

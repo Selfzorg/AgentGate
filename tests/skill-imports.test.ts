@@ -302,7 +302,10 @@ describe("AgentGate skill import recovery scope", () => {
           payload: { payload }
         });
         expect(simulation.statusCode).toBe(200);
-        expect(simulation.json().registry_resolution.imported_selected.skill_id).toContain("skill-001");
+        const simulationBody = simulation.json();
+        expect(simulationBody.registry_resolution.imported_selected.skill_id).toContain("skill-001");
+        expect(simulationBody.registry_resolution.imported_selected.name).toBe("Imported Skill 1");
+        expect(simulationBody.resolved_skill.name).toBe("Imported Skill 1");
 
         const decision = await app.inject({
           method: "POST",

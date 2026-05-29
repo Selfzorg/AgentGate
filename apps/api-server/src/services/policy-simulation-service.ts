@@ -86,6 +86,8 @@ export async function simulatePolicyRisk({
     .filter((check) => check.status !== "passed")
     .map((check) => check.check_key);
   const skillFixture = fixtures.skills.skills.find((skill) => skill.skill_id === resolvedSkill.skill_id);
+  const importedSelected = importedRegistryResolution?.registryResolution.selected ?? null;
+  const importedConfig = recordFrom(importedSelected?.candidate.metadata.config);
 
   return {
     mode: "simulate" as const,
@@ -114,10 +116,11 @@ export async function simulatePolicyRisk({
     },
     resolved_skill: {
       ...resolvedSkill,
-      name: skillFixture?.name ?? resolvedSkill.skill_id,
-      connector_id: skillFixture?.connector_id ?? null,
-      live_requires_execution_token: skillFixture?.live_requires_execution_token ?? false,
-      supports_dry_run: skillFixture?.supports_dry_run ?? false
+      name: skillFixture?.name ?? importedSelected?.candidate.name ?? resolvedSkill.skill_id,
+      connector_id: skillFixture?.connector_id ?? stringFrom(importedConfig.connector_id),
+      live_requires_execution_token:
+        skillFixture?.live_requires_execution_token ?? booleanFrom(importedConfig.live_requires_execution_token),
+      supports_dry_run: skillFixture?.supports_dry_run ?? booleanFrom(importedConfig.supports_dry_run)
     },
     registry_resolution: {
       enabled: true,
@@ -196,4 +199,16 @@ function buildExplanation({
   const policyPart = policyId ? `Matched ${policyId}.` : "No explicit policy matched; default risk fallback applied.";
   const checksPart = missingChecks.length > 0 ? ` Missing checks: ${missingChecks.join(", ")}.` : " Required checks are satisfied.";
   return `${decision}: ${reason} ${policyPart}${checksPart}`;
+}
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function stringFrom(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function booleanFrom(value: unknown) {
+  return value === true;
 }

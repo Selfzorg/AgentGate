@@ -592,6 +592,8 @@ export type RiskScannerSimulation = {
   mode: "simulate";
   side_effects: Record<string, boolean>;
   precedence: string;
+  rollout_mode: "observe" | "warn" | "enforce";
+  policy_rules_source: "fixture_fallback" | "database";
   action: {
     raw_action: string;
     source: string;
@@ -619,6 +621,16 @@ export type RiskScannerSimulation = {
     live_requires_execution_token: boolean;
     supports_dry_run: boolean;
   };
+  registry_resolution: {
+    enabled: boolean;
+    root_dir: string;
+    candidate_count: number;
+    imported_candidate_count: number;
+    imported_selected: RegistryResolutionSelection | null;
+    selected: RegistryResolutionSelection | null;
+    alternatives: RegistryResolutionSelection[];
+    warnings: string[];
+  };
   risk: {
     score: number;
     level: "low" | "medium" | "high" | "critical";
@@ -645,6 +657,21 @@ export type RiskScannerSimulation = {
   missing_checks: string[];
   dry_run_required: boolean;
   explanation: string;
+};
+
+type RegistryResolutionSelection = {
+  skill_id: string;
+  skill_version?: string | null;
+  skill_version_id?: string | null;
+  name: string;
+  source_type: string;
+  scope: string;
+  confidence: number;
+  matched_field: string;
+  content_hash: string;
+  side_effect_level: string;
+  default_risk_level: "low" | "medium" | "high" | "critical";
+  warnings: string[];
 };
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
