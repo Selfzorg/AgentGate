@@ -190,7 +190,7 @@ describe("PR2 policy simulation risk scanner", () => {
         source_type: "codex_skill",
         side_effect_level: "mutating"
       });
-      expect(["path", "description"]).toContain(body.registry_resolution.selected?.matched_field);
+      expect(["name", "path", "description"]).toContain(body.registry_resolution.selected?.matched_field);
     });
 
     await app.close();

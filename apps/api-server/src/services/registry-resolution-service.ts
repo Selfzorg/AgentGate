@@ -24,16 +24,23 @@ export async function resolveImportedRegistrySkill(
     workspaceId: string;
     rawAction: string;
     toolName?: string | undefined;
+    source?: string | undefined;
+    context?: Record<string, unknown> | undefined;
   }
 ): Promise<{ resolvedSkill: ResolvedSkill | null; registryResolution: ImportedRegistryResolution }> {
   const candidates = await activeImportedCandidates(prisma, input.tenantId, input.workspaceId);
+  const resolutionText = [input.rawAction, registryHintFromContext(input.context)].filter(Boolean).join(" ");
   const resolution = resolveRegistryCandidate({
     candidates,
-    rawAction: input.rawAction,
+    rawAction: resolutionText,
     toolName: input.toolName
   });
-  const selected = resolution.selected ? withVersionMetadata(resolution.selected, candidates) : null;
+  const explicitRegistryHint = hasRegistryHint(input.context);
+  const selected = resolution.selected && isResolutionAllowedForSource(resolution.selected, input.source, explicitRegistryHint)
+    ? withVersionMetadata(resolution.selected, candidates)
+    : null;
   const alternatives = resolution.alternatives.flatMap((match) => {
+    if (!isResolutionAllowedForSource(match, input.source, explicitRegistryHint)) return [];
     const enriched = withVersionMetadata(match, candidates);
     return enriched ? [enriched] : [];
   });
@@ -221,4 +228,32 @@ function stringFrom(value: unknown): string | null {
 
 function recordFrom(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function isResolutionAllowedForSource(match: RegistryResolutionMatch, source: string | undefined, explicitRegistryHint: boolean) {
+  if (explicitRegistryHint) return true;
+  if (source === "claude-code" || source === "claude_code") {
+    return match.candidate.sourceType === "claude_skill" || match.candidate.sourceType === "claude_command" || match.candidate.sourceType === "claude_subagent";
+  }
+  if (source === "codex") return match.candidate.sourceType === "codex_skill";
+  if (source === "mcp_proxy") return match.candidate.sourceType === "mcp_tool" || match.candidate.sourceType === "native_connector";
+  if (source === "demo_harness") return match.candidate.sourceType === "demo_fixture";
+  return true;
+}
+
+function registryHintFromContext(context: Record<string, unknown> | undefined) {
+  if (!context) return null;
+  return [
+    stringFrom(context.requested_skill),
+    stringFrom(context.requested_skill_id),
+    stringFrom(context.requested_skill_name),
+    stringFrom(context.original_user_prompt),
+    stringFrom(context.user_intent)
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function hasRegistryHint(context: Record<string, unknown> | undefined) {
+  return Boolean(registryHintFromContext(context));
 }

@@ -9,7 +9,7 @@ export type ResolvedSkill = {
   resolver_reason: string;
   matched_pattern?: string;
   resolver_source?: "imported_registry" | "static_fallback";
-  matched_field?: "skill_id" | "name" | "path" | "description";
+  matched_field?: "skill_id" | "name" | "path" | "declared_tool" | "description";
   source_fingerprint?: {
     source_type: string;
     path: string;
@@ -19,7 +19,7 @@ export type ResolvedSkill = {
   alternatives?: Array<{
     skill_id: string;
     confidence: number;
-    matched_field: "skill_id" | "name" | "path" | "description";
+    matched_field: "skill_id" | "name" | "path" | "declared_tool" | "description";
   }>;
 };
 

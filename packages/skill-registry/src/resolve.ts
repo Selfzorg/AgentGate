@@ -9,7 +9,7 @@ export type RegistryResolutionInput = {
 export type RegistryResolutionMatch = {
   candidate: SkillRegistryCandidate;
   confidence: number;
-  matchedField: "skill_id" | "name" | "path" | "description";
+  matchedField: "skill_id" | "name" | "path" | "declared_tool" | "description";
 };
 
 export type RegistryResolutionResult = {
@@ -43,15 +43,23 @@ function matchCandidate(candidate: SkillRegistryCandidate, haystack: string, hay
   const name = normalize(candidate.name);
   const pathIdentity = pathIdentityFor(candidate.relativePath);
   const description = normalize(candidate.description ?? "");
+  const declaredTools = candidate.declaredTools.flatMap((tool) => declaredToolIdentityFor(tool));
 
   if (skillId && tokenPhraseMatches(haystackTokens, tokensFor(skillId))) {
     matches.push({ candidate, confidence: 1, matchedField: "skill_id" });
   }
   if (name && tokenPhraseMatches(haystackTokens, tokensFor(name))) {
     matches.push({ candidate, confidence: 0.92, matchedField: "name" });
+  } else if (name && unorderedTokensMatch(haystackTokens, tokensFor(name))) {
+    matches.push({ candidate, confidence: 0.86, matchedField: "name" });
   }
   if (pathIdentity.length > 0 && tokenPhraseMatches(haystackTokens, pathIdentity)) {
     matches.push({ candidate, confidence: 0.82, matchedField: "path" });
+  } else if (pathIdentity.length > 0 && unorderedTokensMatch(haystackTokens, pathIdentity)) {
+    matches.push({ candidate, confidence: 0.78, matchedField: "path" });
+  }
+  if (declaredTools.some((toolTokens) => tokenPhraseMatches(haystackTokens, toolTokens))) {
+    matches.push({ candidate, confidence: 0.88, matchedField: "declared_tool" });
   }
 
   const descriptionScore = tokenOverlapScore(haystack, description);
@@ -119,6 +127,21 @@ function pathIdentityFor(relativePath: string): string[] {
   const withoutSkillFile = segments.at(-1)?.toLowerCase() === "skill" ? segments.slice(0, -1) : segments;
   const tail = withoutSkillFile.at(-1) ?? "";
   return tokensFor(tail);
+}
+
+function declaredToolIdentityFor(value: string): string[][] {
+  const normalized = value
+    .replace(/^[a-z]+\((.*)\)$/i, "$1")
+    .replace(/[:*]+/g, " ");
+  const tokens = tokensFor(normalized).filter((token) => token.length >= 3);
+  if (tokens.length < 2) return [];
+  return [tokens];
+}
+
+function unorderedTokensMatch(haystackTokens: string[], needleTokens: string[]): boolean {
+  if (needleTokens.length < 2 || needleTokens.length > 4) return false;
+  const haystack = new Set(haystackTokens);
+  return [...new Set(needleTokens)].every((token) => haystack.has(token));
 }
 
 function canonicalToken(token: string) {

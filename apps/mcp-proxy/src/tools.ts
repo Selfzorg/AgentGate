@@ -111,9 +111,12 @@ export const AGENTGATE_TOOL_DEFINITIONS: AgentGateToolDefinition[] = [
   },
   {
     name: "agentgate_deploy_production",
-    description: "Ask AgentGate to govern a production deployment without calling the deployment provider.",
+    description:
+      "Ask AgentGate to govern a production deployment without calling the deployment provider. If the user named a local Claude/Codex skill or slash command, include it in requested_skill or user_intent so AgentGate can resolve the imported skill registry entry.",
     inputSchema: {
-      service: z.string().default("checkout-api")
+      service: z.string().default("checkout-api"),
+      requested_skill: z.string().optional(),
+      user_intent: z.string().optional()
     }
   },
   {
@@ -492,6 +495,11 @@ function baseContext(args: Record<string, unknown>, environment: "dev" | "stagin
     repo: stringArg(args.repo, "agentgate"),
     branch: optionalString(args.branch),
     cwd: optionalString(args.cwd),
+    requested_skill: optionalString(args.requested_skill),
+    requested_skill_id: optionalString(args.requested_skill_id),
+    requested_skill_name: optionalString(args.requested_skill_name),
+    original_user_prompt: optionalString(args.original_user_prompt),
+    user_intent: optionalString(args.user_intent),
     environment
   });
 }

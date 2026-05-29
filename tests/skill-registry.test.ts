@@ -131,7 +131,44 @@ describe("skill registry scanner", () => {
           skillId: "codex_skill:repo:agents-skills-prod-deploy"
         }
       });
-      expect(["path", "description"]).toContain(resolved.selected?.matchedField);
+      expect(["name", "path", "description"]).toContain(resolved.selected?.matchedField);
+      expect(resolved.selected?.confidence).toBeGreaterThanOrEqual(0.5);
+    });
+  });
+
+  it("resolves imported Claude deployment commands from generated tool calls", async () => {
+    await withTempWorkspace(async (workspace) => {
+      const commandDir = join(workspace, ".claude", "commands", "ecommerce");
+      await mkdir(commandDir, { recursive: true });
+      await writeFile(
+        join(commandDir, "prod-deployment.md"),
+        [
+          "---",
+          "name: prod-deployment",
+          "description: Execute production deployment of e-commerce checkout and catalog microservices.",
+          "allowed-tools: Bash(vercel deploy:*), Bash(echo:*)",
+          "---",
+          "",
+          "Run the approved production deployment workflow."
+        ].join("\n"),
+        "utf8"
+      );
+
+      const scan = await scanAgentSkills({ rootDir: workspace });
+      const resolved = resolveRegistryCandidate({
+        candidates: scan.candidates,
+        rawAction: 'vercel deploy --prod({"service":"checkout-api"})',
+        toolName: "vercel deploy --prod"
+      });
+
+      expect(resolved.selected).toMatchObject({
+        confidence: expect.any(Number),
+        candidate: {
+          skillId: "claude_command:repo:claude-commands-ecommerce-prod-deployment",
+          sourceType: "claude_command"
+        }
+      });
+      expect(["name", "declared_tool", "description"]).toContain(resolved.selected?.matchedField);
       expect(resolved.selected?.confidence).toBeGreaterThanOrEqual(0.5);
     });
   });

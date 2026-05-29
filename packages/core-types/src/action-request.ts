@@ -23,6 +23,11 @@ export type NormalizedActionRequest = {
     environment?: Environment;
     service?: string;
     database?: string;
+    requested_skill?: string;
+    requested_skill_id?: string;
+    requested_skill_name?: string;
+    original_user_prompt?: string;
+    user_intent?: string;
     target_branch?: string;
     ci_status?: "passed" | "failed" | "unknown";
     tests_status?: "passed" | "failed" | "unknown";

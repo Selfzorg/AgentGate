@@ -54,7 +54,9 @@ export function createDecisionService({
         tenantId: request.tenant_id,
         workspaceId: request.workspace_id,
         rawAction: request.raw_action,
-        toolName: request.tool.tool_name
+        toolName: request.tool.tool_name,
+        source: request.source,
+        context: request.context
       });
       const resolvedSkill = importedResolution.resolvedSkill ?? resolveSkill({
         rawAction: request.raw_action,
