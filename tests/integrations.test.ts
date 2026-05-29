@@ -419,7 +419,7 @@ describe("AgentGate MCP proxy integration", () => {
     expect(run.gateCheckResults.every((check) => (check.evidence as { source?: string }).source === "evidence_task")).toBe(true);
     const queuedCiCheck = run.gateCheckResults.find((check) => check.checkKey === "ci_passed");
     const queuedCiEvidence = queuedCiCheck?.evidence as Record<string, unknown>;
-    expect(queuedCiEvidence.selected_runtime).toBe("claude_code_mcp");
+    expect(queuedCiEvidence.selected_runtime).toBe("codex_cli");
 
     await processEvidenceForRun(payload.agentgate.run_id);
 
