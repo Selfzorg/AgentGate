@@ -71,6 +71,11 @@ const aiTone: Record<string, Tone> = {
 };
 
 const gateTone: Record<string, Tone> = {
+  active: "success",
+  inactive: "warning",
+  imported: "success",
+  skipped: "muted",
+  preview: "accent",
   passed: "success",
   failed: "danger",
   missing: "warning",

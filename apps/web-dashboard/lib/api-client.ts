@@ -106,9 +106,102 @@ export type SkillRecord = {
   category: string;
   default_risk_level: "low" | "medium" | "high" | "critical";
   description: string | null;
+  status: string;
   version: string;
+  version_status: string;
   connector: string | null;
+  config: Record<string, unknown>;
   execution: Record<string, unknown>;
+};
+
+export type SkillImportCandidate = {
+  id: string;
+  candidate_id: string;
+  skill_id: string;
+  name: string;
+  description: string | null;
+  source_type: string;
+  source_path: string;
+  relative_path: string;
+  scope: string;
+  content_hash: string;
+  declared_tools: string[];
+  skill_type: string;
+  side_effect_level: string;
+  default_risk_level: "low" | "medium" | "high" | "critical";
+  allowed_runtimes: string[];
+  preferred_runtimes: string[];
+  warnings: string[];
+  metadata: Record<string, unknown>;
+  review_status: string;
+  imported_skill_record_id: string | null;
+  imported_skill_version_id: string | null;
+  review_notes: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SkillImportBatch = {
+  id: string;
+  tenant_id: string;
+  workspace_id: string;
+  root_dir: string;
+  status: string;
+  candidate_count: number;
+  warning_count: number;
+  scan_config: Record<string, unknown>;
+  warnings: string[];
+  requested_by: string | null;
+  reviewed_by: string | null;
+  review_comment: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  candidates?: SkillImportCandidate[];
+};
+
+export type SkillRegistryScan = {
+  rootDir: string;
+  scannedAt: string;
+  candidates: Array<{
+    id: string;
+    skillId: string;
+    name: string;
+    description: string | null;
+    sourceType: string;
+    scope: string;
+    sourcePath: string;
+    relativePath: string;
+    contentHash: string;
+    declaredTools: string[];
+    skillType: string;
+    sideEffectLevel: string;
+    defaultRiskLevel: "low" | "medium" | "high" | "critical";
+    allowedRuntimes: string[];
+    preferredRuntimes: string[];
+    warnings: string[];
+    metadata: Record<string, unknown>;
+  }>;
+  warnings: string[];
+  duplicateGroups: Array<{
+    normalizedName: string;
+    candidates: Array<{
+      id: string;
+      skillId: string;
+      name: string;
+      sourceType: string;
+      scope: string;
+      relativePath: string;
+      contentHash: string;
+    }>;
+  }>;
+  summary: {
+    total: number;
+    bySourceType: Record<string, number>;
+    byRiskLevel: Record<string, number>;
+    bySideEffectLevel: Record<string, number>;
+    warningCount: number;
+  };
 };
 
 export type PolicyRecord = {
@@ -658,8 +751,11 @@ export async function getLiveActivity(): Promise<LiveActivityResponse> {
   return (await response.json()) as LiveActivityResponse;
 }
 
-export async function getSkills(): Promise<{ skills: SkillRecord[] }> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/skills`, {
+export async function getSkills(options: { source?: string; includeInactive?: boolean } = {}): Promise<{ skills: SkillRecord[] }> {
+  const params = new URLSearchParams();
+  if (options.source) params.set("source", options.source);
+  if (options.includeInactive) params.set("include_inactive", "true");
+  const response = await fetch(`${apiBaseUrl}/api/v1/skills${params.size > 0 ? `?${params.toString()}` : ""}`, {
     cache: "no-store"
   });
 
@@ -668,6 +764,125 @@ export async function getSkills(): Promise<{ skills: SkillRecord[] }> {
   }
 
   return (await response.json()) as { skills: SkillRecord[] };
+}
+
+export async function scanSkillRegistry(input: {
+  rootDir?: string;
+  includeUserScopes?: boolean;
+  persistSnapshot?: boolean;
+}): Promise<{ scan: SkillRegistryScan; import_batch: SkillImportBatch | null }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/registry/scan`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      root_dir: input.rootDir || undefined,
+      include_user_scopes: input.includeUserScopes,
+      persist_snapshot: input.persistSnapshot
+    }),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as { scan: SkillRegistryScan; import_batch: SkillImportBatch | null };
+}
+
+export async function createSkillImport(input: {
+  rootDir?: string;
+  includeUserScopes?: boolean;
+}): Promise<{ import_batch: SkillImportBatch; scan: SkillRegistryScan }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/registry/import`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      root_dir: input.rootDir || undefined,
+      include_user_scopes: input.includeUserScopes
+    }),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as { import_batch: SkillImportBatch; scan: SkillRegistryScan };
+}
+
+export async function getSkillImportBatch(batchId: string): Promise<{ import_batch: SkillImportBatch }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/registry/import-batches/${encodeURIComponent(batchId)}`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as { import_batch: SkillImportBatch };
+}
+
+export async function approveSkillImportBatch(
+  batchId: string,
+  input: {
+    candidateIds?: string[];
+    owners?: string[];
+    approverRoles?: string[];
+    comment?: string;
+  } = {}
+): Promise<{ import_batch: SkillImportBatch; imported: unknown[]; skipped: unknown[]; disabled: unknown[] }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/registry/import-batches/${encodeURIComponent(batchId)}/approve`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      candidate_ids: input.candidateIds,
+      owners: input.owners,
+      approver_roles: input.approverRoles,
+      comment: input.comment
+    }),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as { import_batch: SkillImportBatch; imported: unknown[]; skipped: unknown[]; disabled: unknown[] };
+}
+
+export async function rejectSkillImportBatch(batchId: string, comment?: string): Promise<{ import_batch: SkillImportBatch }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/registry/import-batches/${encodeURIComponent(batchId)}/reject`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ comment }),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as { import_batch: SkillImportBatch };
+}
+
+export async function setSkillVersionStatus(
+  skillId: string,
+  version: string,
+  status: "enable" | "disable"
+): Promise<{ skill_version: { id: string; skill_id: string; version: string; status: string } }> {
+  const response = await fetch(
+    `${apiBaseUrl}/api/v1/skills/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(version)}/${status}`,
+    {
+      method: "POST",
+      cache: "no-store"
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as { skill_version: { id: string; skill_id: string; version: string; status: string } };
 }
 
 export async function getPolicies(): Promise<{ policies: PolicyRecord[] }> {

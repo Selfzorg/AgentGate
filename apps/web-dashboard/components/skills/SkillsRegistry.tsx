@@ -1,51 +1,505 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getSkills, type SkillRecord } from "@/lib/api-client";
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Loader2, Power, PowerOff, RefreshCw, Search, UploadCloud, XCircle } from "lucide-react";
+import {
+  approveSkillImportBatch,
+  createSkillImport,
+  getSkills,
+  rejectSkillImportBatch,
+  scanSkillRegistry,
+  setSkillVersionStatus,
+  type SkillImportBatch,
+  type SkillImportCandidate,
+  type SkillRecord,
+  type SkillRegistryScan
+} from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 
 export function SkillsRegistry() {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
-  const [status, setStatus] = useState("Loading seeded skills...");
+  const [scan, setScan] = useState<SkillRegistryScan | null>(null);
+  const [batch, setBatch] = useState<SkillImportBatch | null>(null);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
+  const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
+  const [rootDir, setRootDir] = useState("");
+  const [includeUserScopes, setIncludeUserScopes] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [riskFilter, setRiskFilter] = useState("all");
+  const [warningOnly, setWarningOnly] = useState(false);
+  const [owners, setOwners] = useState("service_owner");
+  const [approverRoles, setApproverRoles] = useState("service_owner");
+  const [comment, setComment] = useState("Imported skill owner review completed.");
+  const [status, setStatus] = useState("Loading skill registry...");
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   useEffect(() => {
-    void getSkills()
-      .then((response) => {
-        setSkills(response.skills);
-        setStatus(`${response.skills.length} skills loaded from the API.`);
-      })
-      .catch(() => setStatus("API unavailable. Start the Phase 1 dev server."));
+    void loadSkills();
   }, []);
 
-  return (
-    <section className="overflow-hidden rounded-ui border border-border bg-surface shadow-panel">
-      <div className="border-b border-border p-5">
-        <h2 className="text-base font-semibold">Seeded Skill Registry</h2>
-        <p className="mt-1 text-sm text-muted">{status}</p>
-      </div>
-      <div className="grid gap-0 divide-y divide-border">
-        {skills.map((skill) => (
-          <article key={skill.id} className="grid gap-3 p-5 md:grid-cols-[1.4fr_1fr_auto] md:items-center">
-            <div>
-              <h3 className="text-sm font-semibold">{skill.name}</h3>
-              <p className="mt-1 font-mono text-xs text-muted">{skill.skill_id}</p>
-            </div>
-            <div className="text-sm text-muted">
-              <div>{skill.category}</div>
-              <div className="font-mono text-xs">connector {skill.connector ?? "none"}</div>
-            </div>
-            <div className="text-left md:text-right">
-              <StatusBadge kind="risk" value={skill.default_risk_level} />
-              <div className="font-mono text-xs text-muted">v{skill.version}</div>
-            </div>
-          </article>
-        ))}
-        {skills.length === 0 ? (
-          <div className="p-5 text-sm text-muted">
-            No skills loaded yet. Run migration and seed before the demo.
-          </div>
-        ) : null}
-      </div>
-    </section>
+  const candidates = useMemo(() => {
+    if (batch?.candidates) return batch.candidates;
+    return (
+      scan?.candidates.map((candidate) => ({
+        id: candidate.id,
+        candidate_id: candidate.id,
+        skill_id: candidate.skillId,
+        name: candidate.name,
+        description: candidate.description,
+        source_type: candidate.sourceType,
+        source_path: candidate.sourcePath,
+        relative_path: candidate.relativePath,
+        scope: candidate.scope,
+        content_hash: candidate.contentHash,
+        declared_tools: candidate.declaredTools,
+        skill_type: candidate.skillType,
+        side_effect_level: candidate.sideEffectLevel,
+        default_risk_level: candidate.defaultRiskLevel,
+        allowed_runtimes: candidate.allowedRuntimes,
+        preferred_runtimes: candidate.preferredRuntimes,
+        warnings: candidate.warnings,
+        metadata: candidate.metadata,
+        review_status: "preview",
+        imported_skill_record_id: null,
+        imported_skill_version_id: null,
+        review_notes: {},
+        created_at: scan.scannedAt,
+        updated_at: scan.scannedAt
+      })) ?? []
+    );
+  }, [batch, scan]);
+
+  const filteredCandidates = useMemo(
+    () =>
+      candidates.filter((candidate) => {
+        if (sourceFilter !== "all" && candidate.source_type !== sourceFilter) return false;
+        if (riskFilter !== "all" && candidate.default_risk_level !== riskFilter) return false;
+        if (warningOnly && candidate.warnings.length === 0) return false;
+        return true;
+      }),
+    [candidates, riskFilter, sourceFilter, warningOnly]
   );
+
+  const activeCandidate = candidates.find((candidate) => candidate.candidate_id === activeCandidateId) ?? filteredCandidates[0] ?? null;
+  const sourceOptions = [...new Set(candidates.map((candidate) => candidate.source_type))].sort();
+  const selectedCount = selectedCandidateIds.length;
+
+  async function loadSkills() {
+    try {
+      const response = await getSkills({ includeInactive: true });
+      setSkills(response.skills);
+      setStatus(`${response.skills.length} skills loaded.`);
+    } catch {
+      setStatus("API unavailable.");
+    }
+  }
+
+  async function runScan() {
+    setPendingAction("scan");
+    try {
+      const trimmedRoot = rootDir.trim();
+      const response = await scanSkillRegistry({
+        ...(trimmedRoot ? { rootDir: trimmedRoot } : {}),
+        includeUserScopes
+      });
+      setScan(response.scan);
+      setBatch(null);
+      setSelectedCandidateIds([]);
+      setActiveCandidateId(response.scan.candidates[0]?.id ?? null);
+      setStatus(`${response.scan.summary.total} candidates found, ${response.scan.summary.warningCount} warnings.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Scan failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function createSnapshot() {
+    setPendingAction("import");
+    try {
+      const trimmedRoot = rootDir.trim();
+      const response = await createSkillImport({
+        ...(trimmedRoot ? { rootDir: trimmedRoot } : {}),
+        includeUserScopes
+      });
+      setScan(response.scan);
+      setBatch(response.import_batch);
+      const pendingIds = response.import_batch.candidates?.map((candidate) => candidate.candidate_id) ?? [];
+      setSelectedCandidateIds(pendingIds);
+      setActiveCandidateId(pendingIds[0] ?? null);
+      setStatus(`Review snapshot ${response.import_batch.id} created.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Import snapshot failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function approveSelected() {
+    if (!batch || selectedCandidateIds.length === 0) return;
+    setPendingAction("approve");
+    try {
+      const response = await approveSkillImportBatch(batch.id, {
+        candidateIds: selectedCandidateIds,
+        owners: splitCsv(owners),
+        approverRoles: splitCsv(approverRoles),
+        comment
+      });
+      setBatch(response.import_batch);
+      setSelectedCandidateIds([]);
+      setStatus(`${response.imported.length} imported, ${response.skipped.length} unchanged, ${response.disabled.length} disabled.`);
+      await loadSkills();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Approval failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function rejectBatch() {
+    if (!batch) return;
+    setPendingAction("reject");
+    try {
+      const response = await rejectSkillImportBatch(batch.id, comment);
+      setBatch(response.import_batch);
+      setSelectedCandidateIds([]);
+      setStatus(`Snapshot ${response.import_batch.id} rejected.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Reject failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function toggleVersion(skill: SkillRecord) {
+    if (skill.version === "unknown") return;
+    setPendingAction(`version:${skill.id}`);
+    try {
+      await setSkillVersionStatus(skill.id, skill.version, skill.version_status === "active" ? "disable" : "enable");
+      await loadSkills();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Version update failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  function toggleCandidate(candidateId: string) {
+    setSelectedCandidateIds((current) =>
+      current.includes(candidateId) ? current.filter((id) => id !== candidateId) : [...current, candidateId]
+    );
+  }
+
+  function selectFiltered() {
+    setSelectedCandidateIds(filteredCandidates.filter((candidate) => candidate.review_status === "pending").map((candidate) => candidate.candidate_id));
+  }
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-ui border border-border bg-surface p-5 shadow-panel">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="min-w-[260px] flex-1">
+            <span className="text-xs font-semibold uppercase text-muted">Skill Root</span>
+            <input
+              value={rootDir}
+              onChange={(event) => setRootDir(event.target.value)}
+              placeholder="API default repository root"
+              className="mt-1 h-10 w-full rounded-ui border border-border bg-background px-3 font-mono text-xs outline-none focus:border-accent"
+            />
+          </label>
+          <label className="flex h-10 items-center gap-2 rounded-ui border border-border bg-background px-3 text-sm">
+            <input
+              type="checkbox"
+              checked={includeUserScopes}
+              onChange={(event) => setIncludeUserScopes(event.target.checked)}
+              className="h-4 w-4"
+            />
+            User scopes
+          </label>
+          <Button variant="secondary" disabled={pendingAction !== null} onClick={() => void runScan()}>
+            {pendingAction === "scan" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            Scan
+          </Button>
+          <Button disabled={pendingAction !== null} onClick={() => void createSnapshot()}>
+            {pendingAction === "import" ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+            Snapshot
+          </Button>
+          <Button variant="ghost" disabled={pendingAction !== null} onClick={() => void loadSkills()}>
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <Metric label="Candidates" value={String(scan?.summary.total ?? batch?.candidate_count ?? 0)} />
+          <Metric label="Warnings" value={String(scan?.summary.warningCount ?? batch?.warning_count ?? 0)} />
+          <Metric label="Duplicates" value={String(scan?.duplicateGroups.length ?? 0)} />
+          <Metric label="Registry" value={String(skills.length)} />
+        </div>
+        <p className="mt-3 text-sm text-muted">{status}</p>
+      </section>
+
+      {candidates.length > 0 ? (
+        <section className="overflow-hidden rounded-ui border border-border bg-surface shadow-panel">
+          <div className="border-b border-border p-5">
+            <div className="flex flex-wrap items-end gap-3">
+              <label>
+                <span className="text-xs font-semibold uppercase text-muted">Source</span>
+                <select
+                  value={sourceFilter}
+                  onChange={(event) => setSourceFilter(event.target.value)}
+                  className="mt-1 h-9 rounded-ui border border-border bg-background px-2 text-sm outline-none focus:border-accent"
+                >
+                  <option value="all">All</option>
+                  {sourceOptions.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className="text-xs font-semibold uppercase text-muted">Risk</span>
+                <select
+                  value={riskFilter}
+                  onChange={(event) => setRiskFilter(event.target.value)}
+                  className="mt-1 h-9 rounded-ui border border-border bg-background px-2 text-sm outline-none focus:border-accent"
+                >
+                  <option value="all">All</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+              <label className="flex h-9 items-center gap-2 rounded-ui border border-border bg-background px-3 text-sm">
+                <input type="checkbox" checked={warningOnly} onChange={(event) => setWarningOnly(event.target.checked)} />
+                Warnings
+              </label>
+              <Button variant="secondary" disabled={!batch || pendingAction !== null} onClick={selectFiltered}>
+                <CheckCircle2 className="h-4 w-4" />
+                Select Pending
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px] text-left text-sm">
+                <thead className="border-b border-border bg-background text-xs uppercase text-muted">
+                  <tr>
+                    <th className="w-12 px-4 py-3">Pick</th>
+                    <th className="px-4 py-3">Candidate</th>
+                    <th className="px-4 py-3">Source</th>
+                    <th className="px-4 py-3">Risk</th>
+                    <th className="px-4 py-3">Side Effect</th>
+                    <th className="px-4 py-3">Review</th>
+                    <th className="px-4 py-3">Warnings</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {filteredCandidates.map((candidate) => (
+                    <tr
+                      key={candidate.candidate_id}
+                      className={activeCandidateId === candidate.candidate_id ? "bg-accent/5" : "bg-surface"}
+                      onClick={() => setActiveCandidateId(candidate.candidate_id)}
+                    >
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedCandidateIds.includes(candidate.candidate_id)}
+                          disabled={candidate.review_status !== "pending"}
+                          onChange={() => toggleCandidate(candidate.candidate_id)}
+                          onClick={(event) => event.stopPropagation()}
+                          className="h-4 w-4"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{candidate.name}</div>
+                        <div className="mt-1 max-w-[320px] truncate font-mono text-xs text-muted">{candidate.skill_id}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <SourcePill value={candidate.source_type} />
+                        <div className="mt-1 font-mono text-xs text-muted">{candidate.scope}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge kind="risk" value={candidate.default_risk_level} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-xs text-muted">{candidate.side_effect_level}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge kind="gate" value={candidate.review_status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={candidate.warnings.length > 0 ? "text-warning" : "text-muted"}>
+                          {candidate.warnings.length}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <CandidateDetail candidate={activeCandidate} />
+          </div>
+
+          <div className="border-t border-border p-5">
+            <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1.4fr_auto_auto] lg:items-end">
+              <label>
+                <span className="text-xs font-semibold uppercase text-muted">Owners</span>
+                <input
+                  value={owners}
+                  onChange={(event) => setOwners(event.target.value)}
+                  className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 text-sm outline-none focus:border-accent"
+                />
+              </label>
+              <label>
+                <span className="text-xs font-semibold uppercase text-muted">Approvers</span>
+                <input
+                  value={approverRoles}
+                  onChange={(event) => setApproverRoles(event.target.value)}
+                  className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 text-sm outline-none focus:border-accent"
+                />
+              </label>
+              <label>
+                <span className="text-xs font-semibold uppercase text-muted">Comment</span>
+                <input
+                  value={comment}
+                  onChange={(event) => setComment(event.target.value)}
+                  className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 text-sm outline-none focus:border-accent"
+                />
+              </label>
+              <Button disabled={!batch || selectedCount === 0 || pendingAction !== null} onClick={() => void approveSelected()}>
+                {pendingAction === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Approve {selectedCount}
+              </Button>
+              <Button variant="secondary" disabled={!batch || pendingAction !== null} onClick={() => void rejectBatch()}>
+                {pendingAction === "reject" ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                Reject
+              </Button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="overflow-hidden rounded-ui border border-border bg-surface shadow-panel">
+        <div className="border-b border-border p-5">
+          <h2 className="text-base font-semibold">Skill Registry</h2>
+          <p className="mt-1 text-sm text-muted">{skills.length} active or imported records returned by the API.</p>
+        </div>
+        <div className="grid gap-0 divide-y divide-border">
+          {skills.map((skill) => (
+            <article key={skill.id} className="grid gap-3 p-5 md:grid-cols-[1.4fr_1fr_auto_auto] md:items-center">
+              <div>
+                <h3 className="text-sm font-semibold">{skill.name}</h3>
+                <p className="mt-1 font-mono text-xs text-muted">{skill.skill_id}</p>
+              </div>
+              <div className="text-sm text-muted">
+                <div>{skill.category}</div>
+                <div className="font-mono text-xs">{sourceTypeFromSkill(skill) ?? `connector ${skill.connector ?? "none"}`}</div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                <StatusBadge kind="risk" value={skill.default_risk_level} />
+                <StatusBadge kind="gate" value={skill.version_status} />
+                <div className="font-mono text-xs text-muted">v{skill.version}</div>
+              </div>
+              <Button
+                variant="secondary"
+                disabled={skill.version === "unknown" || pendingAction === `version:${skill.id}`}
+                onClick={() => void toggleVersion(skill)}
+              >
+                {pendingAction === `version:${skill.id}` ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : skill.version_status === "active" ? (
+                  <PowerOff className="h-4 w-4" />
+                ) : (
+                  <Power className="h-4 w-4" />
+                )}
+                {skill.version_status === "active" ? "Disable" : "Enable"}
+              </Button>
+            </article>
+          ))}
+          {skills.length === 0 ? <div className="p-5 text-sm text-muted">No skills loaded.</div> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-ui border border-border bg-background p-3">
+      <div className="text-xs uppercase text-muted">{label}</div>
+      <div className="mt-1 font-mono text-lg font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function CandidateDetail({ candidate }: { candidate: SkillImportCandidate | null }) {
+  if (!candidate) {
+    return <aside className="border-t border-border p-5 text-sm text-muted lg:border-l lg:border-t-0">No candidate selected.</aside>;
+  }
+
+  return (
+    <aside className="border-t border-border p-5 lg:border-l lg:border-t-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge kind="risk" value={candidate.default_risk_level} />
+        <SourcePill value={candidate.source_type} />
+      </div>
+      <h3 className="mt-4 text-base font-semibold">{candidate.name}</h3>
+      <p className="mt-2 text-sm leading-6 text-muted">{candidate.description ?? "No description."}</p>
+      <div className="mt-4 grid gap-3 text-xs">
+        <DetailRow label="Path" value={candidate.relative_path} />
+        <DetailRow label="Hash" value={candidate.content_hash} />
+        <DetailRow label="Skill Type" value={candidate.skill_type} />
+        <DetailRow label="Side Effect" value={candidate.side_effect_level} />
+        <DetailRow label="Runtimes" value={candidate.allowed_runtimes.join(", ") || "none"} />
+        <DetailRow label="Tools" value={candidate.declared_tools.join(", ") || "none"} />
+      </div>
+      <div className="mt-4 space-y-2">
+        {candidate.warnings.length > 0 ? (
+          candidate.warnings.map((warning) => (
+            <div key={warning} className="rounded-ui border border-warning/30 bg-warning/10 p-2 text-xs leading-5 text-warning">
+              {warning}
+            </div>
+          ))
+        ) : (
+          <div className="rounded-ui border border-border bg-background p-2 text-xs text-muted">No import warnings.</div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="font-semibold uppercase text-muted">{label}</div>
+      <div className="mt-1 break-words font-mono text-muted">{value}</div>
+    </div>
+  );
+}
+
+function SourcePill({ value }: { value: string }) {
+  return (
+    <span className="inline-flex rounded-ui border border-border bg-background px-2 py-1 font-mono text-[11px] uppercase text-muted">
+      {value}
+    </span>
+  );
+}
+
+function splitCsv(value: string) {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function sourceTypeFromSkill(skill: SkillRecord) {
+  const source = skill.config.source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+  const type = (source as Record<string, unknown>).type;
+  return typeof type === "string" ? type : null;
 }
