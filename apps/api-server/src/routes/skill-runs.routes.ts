@@ -1,6 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { serializeAnalysis } from "../services/ai-run-analysis-service";
+import {
+  continueClaudeHandoff,
+  createClaudeHandoff
+} from "../services/claude-handoff-service";
 import { runDryRun } from "../services/dry-run-service";
 import {
   claimExecutionLease,
@@ -17,6 +21,20 @@ const executeBodySchema = z.object({
   execution_token_id: z.string().optional(),
   execution_token: z.string().min(1).optional(),
   idempotency_key: z.string().min(1)
+});
+
+const claudeHandoffBodySchema = z
+  .object({
+    requested_by: z.string().min(1).optional(),
+    ttl_seconds: z.number().int().positive().optional(),
+    api_base_url: z.string().url().optional()
+  })
+  .default({});
+
+const claudeContinueBodySchema = z.object({
+  execution_token: z.string().min(1),
+  idempotency_key: z.string().min(1).optional(),
+  requested_by: z.string().min(1).optional()
 });
 
 const leaseClaimBodySchema = z.object({
@@ -213,6 +231,32 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
       executionToken: body.execution_token,
       idempotencyKey: body.idempotency_key,
       requestedBy: "agentgate-ui"
+    });
+
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/skill-runs/:run_id/claude-handoff", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const body = claudeHandoffBodySchema.parse(request.body ?? {});
+    const result = await createClaudeHandoff(app.services.prisma, {
+      runId,
+      requestedBy: body.requested_by,
+      ttlSeconds: body.ttl_seconds,
+      apiBaseUrl: body.api_base_url
+    });
+
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/skill-runs/:run_id/claude-handoff/continue", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const body = claudeContinueBodySchema.parse(request.body);
+    const result = await continueClaudeHandoff(app.services.prisma, {
+      runId,
+      executionToken: body.execution_token,
+      idempotencyKey: body.idempotency_key,
+      requestedBy: body.requested_by
     });
 
     return reply.code(result.status).send(result.body);

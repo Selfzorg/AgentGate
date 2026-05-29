@@ -12,6 +12,7 @@ export type IssueExecutionTokenInput = {
   requestedBy?: string | undefined;
   ttlSeconds?: number | undefined;
   includeTokenValue?: boolean | undefined;
+  forceNew?: boolean | undefined;
 };
 
 type SkillVersionLike = {
@@ -103,7 +104,7 @@ export async function issueExecutionToken(prisma: PrismaClient, input: IssueExec
     const scopes = scopesForSkill(skillId, run.environment);
     const existing = run.executionTokens[0];
 
-    if (existing) {
+    if (existing && !input.forceNew) {
       await tx.skillRun.update({
         where: { id: run.id },
         data: { status: isRetryToken ? "failed" : "credential_issued" }
@@ -115,6 +116,29 @@ export async function issueExecutionToken(prisma: PrismaClient, input: IssueExec
           execution_token: serializeExecutionToken(existing, scopes, input.ttlSeconds ?? DEFAULT_TTL_SECONDS)
         }
       };
+    }
+
+    if (existing && input.forceNew) {
+      await tx.executionToken.update({
+        where: { id: existing.id },
+        data: {
+          status: "revoked",
+          revokedAt: new Date()
+        }
+      });
+      await emitAuditEvent(tx, {
+        tenantId: run.tenantId,
+        workspaceId: run.workspaceId,
+        skillRunId: run.id,
+        traceId: run.traceId,
+        eventType: "credential.rotated",
+        actorType: "system",
+        actorId: input.requestedBy ?? "system",
+        metadata: {
+          previous_execution_token_id: existing.id,
+          reason: "fresh raw token requested for Claude handoff"
+        }
+      });
     }
 
     const ttlSeconds = Math.max(1, Math.min(input.ttlSeconds ?? DEFAULT_TTL_SECONDS, DEFAULT_TTL_SECONDS));

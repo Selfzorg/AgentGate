@@ -7,13 +7,22 @@ async function main() {
   const args = process.argv.slice(2);
   const [domain, command] = args;
 
-  if (domain !== "skills" || command !== "scan") {
-    printUsage();
-    process.exitCode = 1;
+  if (domain === "skills" && command === "scan") {
+    await runSkillScan(args.slice(2));
     return;
   }
 
-  const options = parseOptions(args.slice(2));
+  if (domain === "claude" && command === "continue") {
+    await runClaudeContinue(args.slice(2));
+    return;
+  }
+
+  printUsage();
+  process.exitCode = 1;
+}
+
+async function runSkillScan(args: string[]) {
+  const options = parseSkillScanOptions(args);
   const rootDir = resolve(options.root ?? process.cwd());
   const rootStat = await stat(rootDir).catch(() => null);
 
@@ -36,7 +45,40 @@ async function main() {
   printScanSummary(scan);
 }
 
-function parseOptions(args: string[]) {
+async function runClaudeContinue(args: string[]) {
+  const options = parseClaudeContinueOptions(args);
+  const apiBaseUrl = options.apiBaseUrl ?? process.env.AGENTGATE_API_BASE_URL ?? "http://localhost:4000";
+  const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs/${encodeURIComponent(options.runId)}/claude-handoff/continue`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      execution_token: options.token,
+      idempotency_key: options.idempotencyKey,
+      requested_by: "claude-code"
+    })
+  });
+  const body = (await response.json()) as Record<string, unknown>;
+
+  if (!response.ok) {
+    console.error(JSON.stringify(body, null, 2));
+    process.exitCode = response.status >= 500 ? 1 : 2;
+    return;
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(body, null, 2));
+    return;
+  }
+
+  const handoff = isRecord(body.claude_handoff) ? body.claude_handoff : {};
+  const execution = isRecord(body.execution) ? body.execution : {};
+  console.log("AgentGate Claude handoff verified");
+  console.log(`Run: ${options.runId}`);
+  console.log(`Status: ${String(handoff.status ?? execution.status ?? "unknown")}`);
+  if (typeof handoff.logs_url === "string") console.log(`Logs: ${apiBaseUrl}${handoff.logs_url}`);
+}
+
+function parseSkillScanOptions(args: string[]) {
   const options: {
     root?: string | undefined;
     includeUserScopes: boolean;
@@ -49,7 +91,7 @@ function parseOptions(args: string[]) {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--root") {
-      options.root = args[index + 1];
+      options.root = requireOptionValue(args, index, arg);
       index += 1;
       continue;
     }
@@ -69,6 +111,70 @@ function parseOptions(args: string[]) {
   }
 
   return options;
+}
+
+function parseClaudeContinueOptions(args: string[]) {
+  const options: {
+    runId?: string | undefined;
+    token?: string | undefined;
+    idempotencyKey?: string | undefined;
+    apiBaseUrl?: string | undefined;
+    json: boolean;
+  } = {
+    json: false
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--run-id") {
+      options.runId = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg === "--token") {
+      options.token = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg === "--idempotency-key") {
+      options.idempotencyKey = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg === "--api-base-url") {
+      options.apiBaseUrl = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg === "--json") {
+      options.json = true;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      printUsage();
+      process.exit(0);
+    }
+    throw new Error(`Unknown option: ${arg}`);
+  }
+
+  if (!options.runId) throw new Error("--run-id is required");
+  if (!options.token) throw new Error("--token is required");
+  return {
+    ...options,
+    runId: options.runId,
+    token: options.token,
+    idempotencyKey: options.idempotencyKey ?? `claude-handoff-${options.runId}`
+  };
+}
+
+function requireOptionValue(args: string[], index: number, option: string) {
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${option} requires a value`);
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function printScanSummary(scan: Awaited<ReturnType<typeof scanAgentSkills>>) {
@@ -109,11 +215,13 @@ function printScanSummary(scan: Awaited<ReturnType<typeof scanAgentSkills>>) {
 function printUsage() {
   console.log(`Usage:
   agentgate skills scan --root <path> [--include-user-scopes] [--json]
+  agentgate claude continue --run-id <run-id> --token <token> [--api-base-url <url>] [--json]
 
 Examples:
   pnpm agentgate skills scan --root .
   pnpm agentgate skills scan --root /path/to/downloaded/skills --json
-  pnpm exec agentgate skills scan --root . --include-user-scopes`);
+  pnpm exec agentgate skills scan --root . --include-user-scopes
+  AGENTGATE_API_BASE_URL=http://localhost:4000 pnpm exec agentgate claude continue --run-id run_123 --token agt_xxx`);
 }
 
 main().catch((error) => {

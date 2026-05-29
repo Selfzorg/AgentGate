@@ -225,7 +225,7 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
   });
 }
 
-function validateApprovedSkillFingerprint(run: {
+export function validateApprovedSkillFingerprint(run: {
   resolvedSkillSnapshot: unknown;
   skill?: {
     versions?: Array<{

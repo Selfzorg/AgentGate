@@ -5,7 +5,11 @@ const TOKEN_REQUIRED_SKILLS = new Set(["deploy-production", "run-db-migration", 
 const CONNECTOR_ENVIRONMENT_ALLOWLIST: Record<string, string[]> = {
   "deployment-demo-connector": ["staging", "production"],
   "db-demo-connector": ["production"],
-  "github-demo-connector": ["dev", "staging", "production"]
+  "github-demo-connector": ["dev", "staging", "production"],
+  "claude-cli-adapter": ["dev", "staging", "production"],
+  "codex-cli-adapter": ["dev", "staging", "production"],
+  "mcp-tool-adapter": ["dev", "staging", "production"],
+  "native-connector-adapter": ["dev", "staging", "production"]
 };
 
 export type ExecutionControlInput = {

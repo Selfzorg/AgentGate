@@ -483,6 +483,31 @@ export type ExecutionTokenSummary = {
   expires_at: string;
 };
 
+export type ClaudeHandoffResponse = {
+  claude_handoff: {
+    run_id: string;
+    trace_id: string;
+    status: string;
+    command: string;
+    instructions: string;
+    skill: {
+      skill_id: string;
+      name: string;
+      source_type: string;
+      approved_hash: string | null;
+      version: string | null;
+    };
+    execution_token: ExecutionTokenSummary;
+    safety: {
+      approval_status: string;
+      token_scope: string[];
+      token_expires_at: string;
+      skill_hash_verified: boolean;
+      raw_token_returned_once: boolean;
+    };
+  };
+};
+
 export type ExecutionLogRecord = {
   id: string;
   sequence: number;
@@ -1151,6 +1176,24 @@ export async function executeSkillRun(
   }
 
   return (await response.json()) as ExecuteSkillRunResponse;
+}
+
+export async function createClaudeHandoff(runId: string): Promise<ClaudeHandoffResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs/${runId}/claude-handoff`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      api_base_url: apiBaseUrl,
+      requested_by: "agentgate-ui",
+      ttl_seconds: 600
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as ClaudeHandoffResponse;
 }
 
 export function getSkillRunLogsUrl(runId: string): string {

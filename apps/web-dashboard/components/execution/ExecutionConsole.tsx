@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLink, KeyRound, Radio, ShieldCheck } from "lucide-react";
+import { Copy, ExternalLink, KeyRound, Radio, ShieldCheck, Terminal } from "lucide-react";
 import {
+  createClaudeHandoff,
   executeSkillRun,
   getSkillRun,
   getSkillRunLogsUrl,
   issueExecutionToken,
+  type ClaudeHandoffResponse,
   type ExecutionLogRecord,
   type ExecutionTokenSummary,
   type SkillRunDetailResponse
@@ -18,6 +20,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 export function ExecutionConsole({ runId }: { runId: string }) {
   const [run, setRun] = useState<SkillRunDetailResponse["skill_run"] | null>(null);
   const [token, setToken] = useState<ExecutionTokenSummary | null>(null);
+  const [claudeHandoff, setClaudeHandoff] = useState<ClaudeHandoffResponse["claude_handoff"] | null>(null);
   const [logs, setLogs] = useState<ExecutionLogRecord[]>([]);
   const [status, setStatus] = useState("Loading execution state...");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -85,11 +88,34 @@ export function ExecutionConsole({ runId }: { runId: string }) {
       const response = await issueExecutionToken(runId, approvalId);
       await reloadRun(`Token ${response.execution_token.status}: ${response.execution_token.execution_token_id}`);
       setToken(response.execution_token);
+      setClaudeHandoff(null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Token issuance failed.");
     } finally {
       setPendingAction(null);
     }
+  }
+
+  async function handleClaudeHandoff() {
+    setPendingAction("Continue in Claude");
+    try {
+      const response = await createClaudeHandoff(runId);
+      await navigator.clipboard?.writeText(response.claude_handoff.command).catch(() => undefined);
+      await reloadRun("Claude handoff token issued. Command copied if clipboard access is available.");
+      setClaudeHandoff(response.claude_handoff);
+      setToken(response.claude_handoff.execution_token);
+      setStatus("Claude handoff ready. Paste the command into Claude Code.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Claude handoff failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function copyClaudeCommand() {
+    if (!claudeHandoff) return;
+    await navigator.clipboard?.writeText(claudeHandoff.command).catch(() => undefined);
+    setStatus("Claude handoff command copied.");
   }
 
   async function handleExecute() {
@@ -153,6 +179,7 @@ export function ExecutionConsole({ runId }: { runId: string }) {
     Boolean(run) &&
     ["approved", "credential_issued", "policy_evaluated"].includes(run?.status ?? "") &&
     (!tokenRequired || Boolean(token?.execution_token_id));
+  const canContinueInClaude = canIssueToken && (run?.source === "claude-code" || run?.source === "claude_code");
 
   return (
     <section className="rounded-ui border border-border bg-surface p-5 shadow-panel">
@@ -190,12 +217,36 @@ export function ExecutionConsole({ runId }: { runId: string }) {
 
       {token ? (
         <div className="mt-3 rounded-ui border border-border bg-background p-3 text-xs text-muted">
-          Browser-visible token metadata only: <span className="font-mono">{token.execution_token_id}</span>. Raw token
-          secret is never returned by the API.
+          Browser-visible token metadata: <span className="font-mono">{token.execution_token_id}</span>.
+          {token.token_value_available
+            ? " Raw token was returned for this one-time handoff and will not be available after refresh."
+            : " Raw token secret is not available from stored state."}
+        </div>
+      ) : null}
+
+      {claudeHandoff ? (
+        <div className="mt-3 rounded-ui border border-accent/30 bg-accent/5 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">Claude handoff ready</div>
+              <div className="mt-1 text-xs text-muted">{claudeHandoff.instructions}</div>
+            </div>
+            <Button variant="secondary" onClick={() => void copyClaudeCommand()}>
+              <Copy className="h-4 w-4" aria-hidden="true" />
+              Copy
+            </Button>
+          </div>
+          <pre className="mt-3 overflow-auto rounded-ui bg-foreground p-3 text-xs leading-5 text-background">
+            {claudeHandoff.command}
+          </pre>
         </div>
       ) : null}
 
       <div className="mt-5 flex flex-wrap gap-2">
+        <Button disabled={!canContinueInClaude} onClick={() => void handleClaudeHandoff()}>
+          <Terminal className="h-4 w-4" aria-hidden="true" />
+          {pendingAction === "Continue in Claude" ? "Preparing" : "Continue in Claude"}
+        </Button>
         <Button variant="secondary" disabled={!canIssueToken} onClick={() => void handleIssueToken()}>
           <KeyRound className="h-4 w-4" aria-hidden="true" />
           {pendingAction === "Issue Execution Token" ? "Issuing" : "Issue Execution Token"}
