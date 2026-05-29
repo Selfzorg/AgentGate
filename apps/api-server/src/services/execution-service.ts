@@ -88,7 +88,8 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
       return {
         status: 409 as const,
         body: {
-          error: "Imported Claude skills must execute through Continue in Claude so Claude Code receives and executes the approved skill body"
+          error:
+            "Imported Claude skills must execute through Continue in Claude so Claude Code receives and executes the approved skill body. Use `pnpm exec agentgate claude continue --run-id <run-id> --token <one-time-token>`, then call `pnpm exec agentgate claude complete --run-id <run-id> --status completed|failed` after local execution."
         }
       };
     }

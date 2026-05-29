@@ -1,10 +1,8 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { serializeAnalysis } from "../services/ai-run-analysis-service";
-import {
-  continueClaudeHandoff,
-  createClaudeHandoff
-} from "../services/claude-handoff-service";
+import { completeClaudeHandoff } from "../services/claude-handoff-completion-service";
+import { continueClaudeHandoff, createClaudeHandoff } from "../services/claude-handoff-service";
 import { runDryRun } from "../services/dry-run-service";
 import {
   claimExecutionLease,
@@ -34,6 +32,14 @@ const claudeHandoffBodySchema = z
 const claudeContinueBodySchema = z.object({
   execution_token: z.string().min(1),
   idempotency_key: z.string().min(1).optional(),
+  requested_by: z.string().min(1).optional(),
+  api_base_url: z.string().url().optional()
+});
+
+const claudeCompleteBodySchema = z.object({
+  status: z.enum(["completed", "failed"]),
+  summary: z.string().min(1).optional(),
+  error: z.record(z.unknown()).optional(),
   requested_by: z.string().min(1).optional()
 });
 
@@ -256,6 +262,21 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
       runId,
       executionToken: body.execution_token,
       idempotencyKey: body.idempotency_key,
+      requestedBy: body.requested_by,
+      apiBaseUrl: body.api_base_url
+    });
+
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/skill-runs/:run_id/claude-handoff/complete", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const body = claudeCompleteBodySchema.parse(request.body);
+    const result = await completeClaudeHandoff(app.services.prisma, {
+      runId,
+      status: body.status,
+      summary: body.summary,
+      error: body.error,
       requestedBy: body.requested_by
     });
 

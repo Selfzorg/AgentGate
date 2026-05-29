@@ -30,6 +30,15 @@ const importParamsSchema = z.object({
 const approveBodySchema = z
   .object({
     candidate_ids: z.array(z.string().min(1)).optional(),
+    candidate_reviews: z
+      .array(
+        z.object({
+          candidate_id: z.string().min(1),
+          required_checks: z.array(z.string().min(1)).optional(),
+          policy_aliases: z.array(z.string().min(1)).optional()
+        })
+      )
+      .optional(),
     reviewed_by: z.string().min(1).optional(),
     comment: z.string().optional(),
     owners: z.array(z.string().min(1)).optional(),
@@ -82,6 +91,11 @@ export const registerRegistryRoutes: FastifyPluginAsync = async (app) => {
     const result = await approveRegistryImportBatch(app.services.prisma, {
       batchId: params.batch_id,
       candidateIds: body.candidate_ids,
+      candidateReviews: body.candidate_reviews?.map((review) => ({
+        candidateId: review.candidate_id,
+        requiredChecks: review.required_checks,
+        policyAliases: review.policy_aliases
+      })),
       reviewedBy: body.reviewed_by,
       comment: body.comment,
       owners: body.owners,

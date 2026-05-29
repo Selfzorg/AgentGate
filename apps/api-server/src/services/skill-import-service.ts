@@ -2,6 +2,13 @@ import { scanAgentSkills, type ScanAgentSkillsResult, type SkillRegistryCandidat
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { emitAuditEvent } from "./audit-event-service";
 import { createId } from "./id";
+import {
+  evidenceWarningsForChecks,
+  inferPolicyAliasesForCandidate,
+  inferredRequiredChecksForCandidate,
+  normalizeRequiredChecks,
+  rawRequiredEvidenceForCandidate
+} from "./imported-skill-governance";
 
 export type RegistryScanInput = {
   tenantId: string;
@@ -17,6 +24,11 @@ export type RegistryImportInput = Omit<RegistryScanInput, "persistSnapshot">;
 export type ApproveImportInput = {
   batchId: string;
   candidateIds?: string[] | undefined;
+  candidateReviews?: Array<{
+    candidateId: string;
+    requiredChecks?: string[] | undefined;
+    policyAliases?: string[] | undefined;
+  }> | undefined;
   reviewedBy?: string | undefined;
   comment?: string | undefined;
   owners?: string[] | undefined;
@@ -131,12 +143,16 @@ export async function approveRegistryImportBatch(prisma: PrismaClient, input: Ap
     const imported: Array<{ candidate_id: string; skill_id: string; version: string; status: string }> = [];
     const skipped: Array<{ candidate_id: string; skill_id: string; version: string; reason: string }> = [];
     const disabled: Array<{ candidate_id: string; skill_id: string; version: string; reason: string }> = [];
+    const candidateReviews = new Map((input.candidateReviews ?? []).map((review) => [review.candidateId, review]));
 
     for (const candidate of batch.candidates) {
       const version = versionForHash(candidate.contentHash);
+      const candidateReview = candidateReviews.get(candidate.candidateId);
       const reviewMetadata = reviewMetadataForCandidate(candidate, {
         owners: input.owners ?? [],
-        approverRoles: input.approverRoles ?? []
+        approverRoles: input.approverRoles ?? [],
+        requiredChecks: candidateReview?.requiredChecks,
+        policyAliases: candidateReview?.policyAliases
       });
       const activeByReview = canImportActive(candidate, {
         owners: reviewMetadata.owners,
@@ -217,6 +233,9 @@ export async function approveRegistryImportBatch(prisma: PrismaClient, input: Ap
             batchId: batch.id,
             owners: reviewMetadata.owners,
             approverRoles: reviewMetadata.approverRoles,
+            requiredChecks: reviewMetadata.requiredChecks,
+            policyAliases: reviewMetadata.policyAliases,
+            evidenceWarnings: reviewMetadata.evidenceWarnings,
             activeByReview
           }) as Prisma.InputJsonValue,
           execution: skillVersionExecution(candidate) as Prisma.InputJsonValue
@@ -233,7 +252,10 @@ export async function approveRegistryImportBatch(prisma: PrismaClient, input: Ap
             reviewed_by: input.reviewedBy ?? "user_service_owner",
             comment: input.comment ?? null,
             version_status: versionStatus,
-            active_review_reason: activeByReview.reason
+            active_review_reason: activeByReview.reason,
+            required_checks: reviewMetadata.requiredChecks,
+            policy_aliases: reviewMetadata.policyAliases,
+            evidence_warnings: reviewMetadata.evidenceWarnings
           } as Prisma.InputJsonValue
         }
       });
@@ -531,6 +553,13 @@ function serializeImportBatch(batch: {
       preferred_runtimes: candidate.preferredRuntimes,
       warnings: candidate.warnings,
       metadata: candidate.metadata,
+      inferred_policy_aliases: inferPolicyAliasesForCandidate(candidateForGovernance(candidate)),
+      inferred_required_checks: inferredRequiredChecksForCandidate(candidateForGovernance(candidate)),
+      required_evidence_raw: rawRequiredEvidenceForCandidate(candidate),
+      evidence_warnings: evidenceWarningsForChecks(
+        inferredRequiredChecksForCandidate(candidateForGovernance(candidate)),
+        rawRequiredEvidenceForCandidate(candidate)
+      ),
       review_status: candidate.reviewStatus,
       imported_skill_record_id: candidate.importedSkillRecordId,
       imported_skill_version_id: candidate.importedSkillVersionId,
@@ -543,17 +572,40 @@ function serializeImportBatch(batch: {
 
 function reviewMetadataForCandidate(
   candidate: {
+    name: string;
+    skillId: string;
+    description: string | null;
+    relativePath: string;
+    declaredTools: unknown;
+    skillType: string;
+    sideEffectLevel: string;
+    defaultRiskLevel: string;
     metadata: unknown;
   },
-  review: { owners: string[]; approverRoles: string[] }
+  review: {
+    owners: string[];
+    approverRoles: string[];
+    requiredChecks?: string[] | undefined;
+    policyAliases?: string[] | undefined;
+  }
 ) {
   const metadata = recordFrom(candidate.metadata);
   const ownerDefaults = stringArray(metadata.owners);
   const approverDefaults = stringArray(metadata.approver_roles);
+  const requiredChecks = normalizeRequiredChecks(
+    review.requiredChecks && review.requiredChecks.length > 0 ? review.requiredChecks : inferredRequiredChecksForCandidate(candidateForGovernance(candidate))
+  );
+  const rawRequiredEvidence = rawRequiredEvidenceForCandidate(candidate);
 
   return {
     owners: review.owners.length > 0 ? review.owners : ownerDefaults,
-    approverRoles: review.approverRoles.length > 0 ? review.approverRoles : approverDefaults
+    approverRoles: review.approverRoles.length > 0 ? review.approverRoles : approverDefaults,
+    requiredChecks,
+    policyAliases:
+      review.policyAliases && review.policyAliases.length > 0
+        ? normalizePolicyAliases(review.policyAliases)
+        : inferPolicyAliasesForCandidate(candidateForGovernance(candidate)),
+    evidenceWarnings: evidenceWarningsForChecks(requiredChecks, rawRequiredEvidence)
   };
 }
 
@@ -597,10 +649,14 @@ function skillVersionConfig(
     batchId: string;
     owners: string[];
     approverRoles: string[];
+    requiredChecks: string[];
+    policyAliases: string[];
+    evidenceWarnings: string[];
     activeByReview: { active: boolean; reason: string };
   }
 ) {
   const metadata = recordFrom(candidate.metadata);
+  const rawRequiredEvidence = rawRequiredEvidenceForCandidate(candidate);
   return {
     source: {
       type: candidate.sourceType,
@@ -619,7 +675,15 @@ function skillVersionConfig(
     owners: input.owners,
     approver_roles: input.approverRoles,
     environments: stringArray(metadata.environments),
-    required_evidence: stringArray(metadata.required_evidence),
+    required_evidence: rawRequiredEvidence,
+    required_checks: input.requiredChecks,
+    policy_aliases: input.policyAliases,
+    evidence_review: {
+      reviewed_required_checks: input.requiredChecks,
+      inferred_required_checks: inferredRequiredChecksForCandidate(candidateForGovernance(candidate)),
+      required_evidence_raw: rawRequiredEvidence,
+      warnings: input.evidenceWarnings
+    },
     classification_flags: recordFrom(metadata.classification_flags),
     supporting_files: stringArray(metadata.supporting_files),
     supporting_file_count: numberFrom(metadata.supporting_file_count),
@@ -692,4 +756,32 @@ function numberFrom(value: unknown): number {
 
 function recordFrom(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function candidateForGovernance(candidate: {
+  name?: string;
+  skillId?: string;
+  description?: string | null;
+  relativePath?: string;
+  declaredTools?: unknown;
+  skillType?: string;
+  sideEffectLevel?: string;
+  defaultRiskLevel?: string;
+  metadata: unknown;
+}) {
+  return {
+    name: candidate.name ?? "",
+    skillId: candidate.skillId ?? "",
+    description: candidate.description ?? null,
+    relativePath: candidate.relativePath ?? "",
+    declaredTools: candidate.declaredTools ?? [],
+    skillType: candidate.skillType ?? "execution",
+    sideEffectLevel: candidate.sideEffectLevel ?? "mutating",
+    defaultRiskLevel: candidate.defaultRiskLevel ?? "medium",
+    metadata: candidate.metadata
+  };
+}
+
+function normalizePolicyAliases(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }

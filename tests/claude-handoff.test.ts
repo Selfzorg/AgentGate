@@ -80,6 +80,7 @@ describe("Claude approved-run handoff", () => {
         const decisionBody = decision.json();
         expect(decisionBody.decision).toBe("REQUIRE_APPROVAL");
         expect(decisionBody.skill_id).toContain("deploy-prod-handoff");
+        await markGateChecksPassed(decisionBody.run_id);
 
         const approval = await prisma.approvalRequest.findUniqueOrThrow({
           where: { skillRunId: decisionBody.run_id }
@@ -139,6 +140,8 @@ describe("Claude approved-run handoff", () => {
         expect(continued.statusCode).toBe(200);
         const continuedBody = continued.json();
         expect(continuedBody.claude_handoff.status).toBe("execution_packet_issued");
+        expect(continuedBody.claude_handoff.completion_command).toContain("agentgate claude complete");
+        expect(continuedBody.claude_handoff.completion_command).toContain(`--run-id '${decisionBody.run_id}'`);
         expect(continuedBody.execution_packet.version).toBe("agentgate.claude_execution_packet.v1");
         expect(continuedBody.execution_packet.skill.body).toContain("vercel deploy --prod --confirm");
         expect(continuedBody.execution_packet.skill.entrypoint_content_hash).toMatch(/^sha256:/);
@@ -162,6 +165,32 @@ describe("Claude approved-run handoff", () => {
         });
         expect(attempt.status).toBe("executing");
         expect(attempt.claimedByRunnerId).toBe("claude-code");
+
+        const complete = await app.inject({
+          method: "POST",
+          url: `/api/v1/skill-runs/${decisionBody.run_id}/claude-handoff/complete`,
+          payload: {
+            status: "completed",
+            summary: "Claude executed the approved deploy command."
+          }
+        });
+        expect(complete.statusCode).toBe(200);
+        expect(complete.json().claude_handoff.status).toBe("completed");
+
+        const completedRun = await prisma.skillRun.findUniqueOrThrow({
+          where: { id: decisionBody.run_id },
+          include: {
+            skillRunAttempts: true,
+            executionLogs: true,
+            auditEvents: true
+          }
+        });
+        expect(completedRun.status).toBe("completed");
+        expect(completedRun.skillRunAttempts.find((entry) => entry.id === attempt.id)?.status).toBe("completed");
+        expect(completedRun.executionLogs.some((log) => log.message.includes("Claude executed the approved deploy command."))).toBe(true);
+        expect(completedRun.auditEvents.map((event) => event.eventType)).toEqual(
+          expect.arrayContaining(["execution.completed", "audit.finalized"])
+        );
       } finally {
         await app.close();
       }
@@ -239,4 +268,24 @@ async function createClaudeCommand(workspace: string, name: string) {
     ].join("\n"),
     "utf8"
   );
+}
+
+async function markGateChecksPassed(runId: string) {
+  await prisma.gateCheckResult.updateMany({
+    where: { skillRunId: runId },
+    data: {
+      status: "passed",
+      evidence: {
+        source: "test",
+        status: "passed"
+      }
+    }
+  });
+  await prisma.approvalRequest.update({
+    where: { skillRunId: runId },
+    data: {
+      approvalReadiness: "ready",
+      missingChecks: []
+    }
+  });
 }

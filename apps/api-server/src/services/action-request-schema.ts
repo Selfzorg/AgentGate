@@ -43,6 +43,7 @@ export const normalizedActionRequestSchema = z.object({
       ci_status: z.enum(["passed", "failed", "unknown"]).optional(),
       tests_status: z.enum(["passed", "failed", "unknown"]).optional(),
       security_scan: z.enum(["passed", "failed", "unknown"]).optional(),
+      security_scan_passed: z.boolean().optional(),
       rollback_plan: z.enum(["exists", "missing", "unknown"]).optional(),
       staging_deploy: z.enum(["success", "failed", "unknown"]).optional(),
       dry_run_completed: z.boolean().optional(),

@@ -26,6 +26,7 @@ const labels: Record<string, string> = {
   tests_passed: "Tests passed",
   rollback_plan_exists: "Rollback plan exists",
   staging_deploy_successful: "Staging deploy successful",
+  security_scan_passed: "Security scan passed",
   dry_run_completed: "Dry-run completed",
   schema_diff_generated: "Schema diff generated",
   backup_exists: "Backup exists",
@@ -110,6 +111,10 @@ export async function getMissingChecks(
 function statusForCheck(checkKey: string, context: Record<string, unknown>): GateCheckStatus {
   if (checkKey === "ci_passed") return statusFromTriState(context.ci_status, "passed");
   if (checkKey === "tests_passed") return statusFromTriState(context.tests_status, "passed");
+  if (checkKey === "security_scan_passed") {
+    if (context.security_scan_passed === true) return "passed";
+    return statusFromTriState(context.security_scan, "passed");
+  }
   if (checkKey === "rollback_plan_exists") return statusFromTriState(context.rollback_plan, "exists");
   if (checkKey === "staging_deploy_successful") return statusFromTriState(context.staging_deploy, "success");
   if (checkKey === "dry_run_completed") return context.dry_run_completed === true ? "passed" : "missing";

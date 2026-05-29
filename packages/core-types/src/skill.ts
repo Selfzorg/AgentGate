@@ -10,6 +10,8 @@ export type ResolvedSkill = {
   matched_pattern?: string;
   resolver_source?: "imported_registry" | "static_fallback";
   matched_field?: "skill_id" | "name" | "path" | "declared_tool" | "description";
+  policy_aliases?: string[];
+  required_checks?: string[];
   source_fingerprint?: {
     source_type: string;
     path: string;

@@ -9,6 +9,7 @@ export type PolicyEvaluationInput = {
   rules: DemoPolicyRule[];
   role: string;
   skill_id: string;
+  skill_aliases?: string[] | undefined;
   risk_level: RiskLevel;
   context: Record<string, unknown>;
 };
@@ -56,12 +57,15 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluationRe
 function policyRuleMatches(rule: DemoPolicyRule, input: PolicyEvaluationInput): boolean {
   return Object.entries(rule.when).every(([key, expected]) => {
     const actual = valueForPolicyKey(key, input);
+    if (key === "skill" && typeof expected === "string" && Array.isArray(actual)) {
+      return actual.includes(expected);
+    }
     return actual === expected;
   });
 }
 
 function valueForPolicyKey(key: string, input: PolicyEvaluationInput): unknown {
   if (key === "role") return input.role;
-  if (key === "skill") return input.skill_id;
+  if (key === "skill") return [input.skill_id, ...(input.skill_aliases ?? [])];
   return input.context[key];
 }

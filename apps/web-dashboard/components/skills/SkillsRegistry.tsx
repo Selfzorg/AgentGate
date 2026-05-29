@@ -16,6 +16,18 @@ import {
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import {
+  defaultReviewDraft,
+  evidenceWarningsForChecks,
+  inferPolicyAliasesForCandidate,
+  inferredRequiredChecksForCandidate,
+  rawRequiredEvidenceForCandidate,
+  reviewDraftsForCandidates,
+  sourceTypeFromSkill,
+  uniqueStrings,
+  warningCountForCandidate,
+  type CandidateReviewDraft
+} from "./import-review-helpers";
 
 export function SkillsRegistry() {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
@@ -31,6 +43,7 @@ export function SkillsRegistry() {
   const [owners, setOwners] = useState("service_owner");
   const [approverRoles, setApproverRoles] = useState("service_owner");
   const [comment, setComment] = useState("Imported skill owner review completed.");
+  const [candidateReviews, setCandidateReviews] = useState<Record<string, CandidateReviewDraft>>({});
   const [status, setStatus] = useState("Loading skill registry...");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
@@ -60,6 +73,10 @@ export function SkillsRegistry() {
         preferred_runtimes: candidate.preferredRuntimes,
         warnings: candidate.warnings,
         metadata: candidate.metadata,
+        inferred_policy_aliases: inferPolicyAliasesForCandidate(candidate),
+        inferred_required_checks: inferredRequiredChecksForCandidate(candidate),
+        required_evidence_raw: rawRequiredEvidenceForCandidate(candidate),
+        evidence_warnings: evidenceWarningsForChecks(inferredRequiredChecksForCandidate(candidate), rawRequiredEvidenceForCandidate(candidate)),
         review_status: "preview",
         imported_skill_record_id: null,
         imported_skill_version_id: null,
@@ -75,7 +92,7 @@ export function SkillsRegistry() {
       candidates.filter((candidate) => {
         if (sourceFilter !== "all" && candidate.source_type !== sourceFilter) return false;
         if (riskFilter !== "all" && candidate.default_risk_level !== riskFilter) return false;
-        if (warningOnly && candidate.warnings.length === 0) return false;
+        if (warningOnly && warningCountForCandidate(candidate) === 0) return false;
         return true;
       }),
     [candidates, riskFilter, sourceFilter, warningOnly]
@@ -106,6 +123,7 @@ export function SkillsRegistry() {
       setScan(response.scan);
       setBatch(null);
       setSelectedCandidateIds([]);
+      setCandidateReviews({});
       setActiveCandidateId(response.scan.candidates[0]?.id ?? null);
       setStatus(`${response.scan.summary.total} candidates found, ${response.scan.summary.warningCount} warnings.`);
     } catch (error) {
@@ -127,6 +145,7 @@ export function SkillsRegistry() {
       setBatch(response.import_batch);
       const pendingIds = response.import_batch.candidates?.map((candidate) => candidate.candidate_id) ?? [];
       setSelectedCandidateIds(pendingIds);
+      setCandidateReviews(reviewDraftsForCandidates(response.import_batch.candidates ?? []));
       setActiveCandidateId(pendingIds[0] ?? null);
       setStatus(`Review snapshot ${response.import_batch.id} created.`);
     } catch (error) {
@@ -142,6 +161,11 @@ export function SkillsRegistry() {
     try {
       const response = await approveSkillImportBatch(batch.id, {
         candidateIds: selectedCandidateIds,
+        candidateReviews: selectedCandidateIds.map((candidateId) => ({
+          candidateId,
+          requiredChecks: splitCsv(candidateReviews[candidateId]?.requiredChecks ?? ""),
+          policyAliases: splitCsv(candidateReviews[candidateId]?.policyAliases ?? "")
+        })),
         owners: splitCsv(owners),
         approverRoles: splitCsv(approverRoles),
         comment
@@ -332,8 +356,8 @@ export function SkillsRegistry() {
                         <StatusBadge kind="gate" value={candidate.review_status} />
                       </td>
                       <td className="px-4 py-3">
-                        <span className={candidate.warnings.length > 0 ? "text-warning" : "text-muted"}>
-                          {candidate.warnings.length}
+                        <span className={warningCountForCandidate(candidate) > 0 ? "text-warning" : "text-muted"}>
+                          {warningCountForCandidate(candidate)}
                         </span>
                       </td>
                     </tr>
@@ -342,7 +366,16 @@ export function SkillsRegistry() {
               </table>
             </div>
 
-            <CandidateDetail candidate={activeCandidate} />
+            <CandidateDetail
+              candidate={activeCandidate}
+              review={activeCandidate ? candidateReviews[activeCandidate.candidate_id] ?? defaultReviewDraft(activeCandidate) : null}
+              onReviewChange={(candidateId, review) =>
+                setCandidateReviews((current) => ({
+                  ...current,
+                  [candidateId]: review
+                }))
+              }
+            />
           </div>
 
           <div className="border-t border-border p-5">
@@ -437,10 +470,27 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CandidateDetail({ candidate }: { candidate: SkillImportCandidate | null }) {
+function CandidateDetail({
+  candidate,
+  review,
+  onReviewChange
+}: {
+  candidate: SkillImportCandidate | null;
+  review: CandidateReviewDraft | null;
+  onReviewChange: (candidateId: string, review: CandidateReviewDraft) => void;
+}) {
   if (!candidate) {
     return <aside className="border-t border-border p-5 text-sm text-muted lg:border-l lg:border-t-0">No candidate selected.</aside>;
   }
+
+  const activeReview = review ?? defaultReviewDraft(candidate);
+  const reviewedChecks = splitCsv(activeReview.requiredChecks);
+  const reviewedAliases = splitCsv(activeReview.policyAliases);
+  const evidenceWarnings = [
+    ...(candidate.evidence_warnings ?? []),
+    ...evidenceWarningsForChecks(reviewedChecks, candidate.required_evidence_raw ?? [])
+  ];
+  const allWarnings = uniqueStrings([...candidate.warnings, ...evidenceWarnings]);
 
   return (
     <aside className="border-t border-border p-5 lg:border-l lg:border-t-0">
@@ -457,10 +507,32 @@ function CandidateDetail({ candidate }: { candidate: SkillImportCandidate | null
         <DetailRow label="Side Effect" value={candidate.side_effect_level} />
         <DetailRow label="Runtimes" value={candidate.allowed_runtimes.join(", ") || "none"} />
         <DetailRow label="Tools" value={candidate.declared_tools.join(", ") || "none"} />
+        <DetailRow label="Raw Evidence" value={(candidate.required_evidence_raw ?? []).join(", ") || "none"} />
+        <DetailRow label="Inferred Checks" value={(candidate.inferred_required_checks ?? []).join(", ") || "none"} />
+        <DetailRow label="Policy Aliases" value={(candidate.inferred_policy_aliases ?? []).join(", ") || "none"} />
+      </div>
+      <div className="mt-4 grid gap-3 text-xs">
+        <label>
+          <span className="font-semibold uppercase text-muted">Required Checks</span>
+          <input
+            value={activeReview.requiredChecks}
+            onChange={(event) => onReviewChange(candidate.candidate_id, { ...activeReview, requiredChecks: event.target.value })}
+            className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 font-mono text-xs outline-none focus:border-accent"
+          />
+        </label>
+        <label>
+          <span className="font-semibold uppercase text-muted">Policy Aliases</span>
+          <input
+            value={activeReview.policyAliases}
+            onChange={(event) => onReviewChange(candidate.candidate_id, { ...activeReview, policyAliases: event.target.value })}
+            className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 font-mono text-xs outline-none focus:border-accent"
+          />
+        </label>
+        {reviewedAliases.length > 0 ? <DetailRow label="Alias Count" value={String(reviewedAliases.length)} /> : null}
       </div>
       <div className="mt-4 space-y-2">
-        {candidate.warnings.length > 0 ? (
-          candidate.warnings.map((warning) => (
+        {allWarnings.length > 0 ? (
+          allWarnings.map((warning) => (
             <div key={warning} className="rounded-ui border border-warning/30 bg-warning/10 p-2 text-xs leading-5 text-warning">
               {warning}
             </div>
@@ -495,11 +567,4 @@ function splitCsv(value: string) {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
-}
-
-function sourceTypeFromSkill(skill: SkillRecord) {
-  const source = skill.config.source;
-  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
-  const type = (source as Record<string, unknown>).type;
-  return typeof type === "string" ? type : null;
 }

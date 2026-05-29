@@ -17,6 +17,11 @@ async function main() {
     return;
   }
 
+  if (domain === "claude" && command === "complete") {
+    await runClaudeComplete(args.slice(2));
+    return;
+  }
+
   printUsage();
   process.exitCode = 1;
 }
@@ -54,7 +59,8 @@ async function runClaudeContinue(args: string[]) {
     body: JSON.stringify({
       execution_token: options.token,
       idempotency_key: options.idempotencyKey,
-      requested_by: "claude-code"
+      requested_by: "claude-code",
+      api_base_url: apiBaseUrl
     })
   });
   const body = (await response.json()) as Record<string, unknown>;
@@ -86,6 +92,8 @@ async function runClaudeContinue(args: string[]) {
   console.log(`Entrypoint hash: ${String(skill.entrypoint_content_hash ?? "unknown")}`);
   console.log(`Token status: ${String(safety.token_status ?? "unknown")}`);
   if (typeof handoff.logs_url === "string") console.log(`Logs: ${apiBaseUrl}${handoff.logs_url}`);
+  if (typeof handoff.completion_command === "string") console.log(`Completion command: ${handoff.completion_command}`);
+  if (typeof handoff.failure_command === "string") console.log(`Failure command: ${handoff.failure_command}`);
   console.log("");
   console.log("Claude Code instructions:");
   for (const instruction of Array.isArray(packet.instructions) ? packet.instructions : []) {
@@ -114,6 +122,39 @@ async function runClaudeContinue(args: string[]) {
   }
   console.log("");
   console.log("Execute the approved skill body now. Do not run a different skill or target.");
+  console.log("After execution, run the completion command. If execution fails, run the failure command.");
+}
+
+async function runClaudeComplete(args: string[]) {
+  const options = parseClaudeCompleteOptions(args);
+  const apiBaseUrl = options.apiBaseUrl ?? process.env.AGENTGATE_API_BASE_URL ?? "http://localhost:4000";
+  const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs/${encodeURIComponent(options.runId)}/claude-handoff/complete`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      status: options.status,
+      summary: options.summary,
+      requested_by: "claude-code"
+    })
+  });
+  const body = (await response.json()) as Record<string, unknown>;
+
+  if (!response.ok) {
+    console.error(JSON.stringify(body, null, 2));
+    process.exitCode = response.status >= 500 ? 1 : 2;
+    return;
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(body, null, 2));
+    return;
+  }
+
+  const handoff = isRecord(body.claude_handoff) ? body.claude_handoff : {};
+  console.log("AgentGate Claude handoff finalized");
+  console.log(`Run: ${options.runId}`);
+  console.log(`Status: ${String(handoff.status ?? options.status)}`);
+  if (typeof handoff.logs_url === "string") console.log(`Logs: ${apiBaseUrl}${handoff.logs_url}`);
 }
 
 function parseSkillScanOptions(args: string[]) {
@@ -205,6 +246,61 @@ function parseClaudeContinueOptions(args: string[]) {
   };
 }
 
+function parseClaudeCompleteOptions(args: string[]) {
+  const options: {
+    runId?: string | undefined;
+    status?: "completed" | "failed" | undefined;
+    summary?: string | undefined;
+    apiBaseUrl?: string | undefined;
+    json: boolean;
+  } = {
+    json: false
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--run-id") {
+      options.runId = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg === "--status") {
+      const status = requireOptionValue(args, index, arg);
+      if (status !== "completed" && status !== "failed") throw new Error("--status must be completed or failed");
+      options.status = status;
+      index += 1;
+      continue;
+    }
+    if (arg === "--summary") {
+      options.summary = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg === "--api-base-url") {
+      options.apiBaseUrl = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg === "--json") {
+      options.json = true;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      printUsage();
+      process.exit(0);
+    }
+    throw new Error(`Unknown option: ${arg}`);
+  }
+
+  if (!options.runId) throw new Error("--run-id is required");
+  if (!options.status) throw new Error("--status is required");
+  return {
+    ...options,
+    runId: options.runId,
+    status: options.status
+  };
+}
+
 function requireOptionValue(args: string[], index: number, option: string) {
   const value = args[index + 1];
   if (!value || value.startsWith("--")) throw new Error(`${option} requires a value`);
@@ -254,12 +350,14 @@ function printUsage() {
   console.log(`Usage:
   agentgate skills scan --root <path> [--include-user-scopes] [--json]
   agentgate claude continue --run-id <run-id> --token <token> [--api-base-url <url>] [--json]
+  agentgate claude complete --run-id <run-id> --status completed|failed [--summary <text>] [--api-base-url <url>] [--json]
 
 Examples:
   pnpm agentgate skills scan --root .
   pnpm agentgate skills scan --root /path/to/downloaded/skills --json
   pnpm exec agentgate skills scan --root . --include-user-scopes
-  AGENTGATE_API_BASE_URL=http://localhost:4000 pnpm exec agentgate claude continue --run-id run_123 --token agt_xxx`);
+  AGENTGATE_API_BASE_URL=http://localhost:4000 pnpm exec agentgate claude continue --run-id run_123 --token agt_xxx
+  AGENTGATE_API_BASE_URL=http://localhost:4000 pnpm exec agentgate claude complete --run-id run_123 --status completed`);
 }
 
 main().catch((error) => {

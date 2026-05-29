@@ -25,6 +25,7 @@ export type ContinueClaudeHandoffInput = {
   executionToken: string;
   idempotencyKey?: string | undefined;
   requestedBy?: string | undefined;
+  apiBaseUrl?: string | undefined;
 };
 
 export async function createClaudeHandoff(prisma: PrismaClient, input: CreateClaudeHandoffInput) {
@@ -270,7 +271,19 @@ export async function continueClaudeHandoff(prisma: PrismaClient, input: Continu
           skill_id: skillId,
           source_type: validation.sourceType,
           attempt_id: attempt.id,
-          logs_url: `/api/v1/skill-runs/${run.id}/logs`
+          logs_url: `/api/v1/skill-runs/${run.id}/logs`,
+          completion_command: buildClaudeCompletionCommand({
+            apiBaseUrl: input.apiBaseUrl ?? process.env.AGENTGATE_API_BASE_URL ?? DEFAULT_API_BASE_URL,
+            runId: input.runId,
+            status: "completed"
+          }),
+          failure_command: buildClaudeCompletionCommand({
+            apiBaseUrl: input.apiBaseUrl ?? process.env.AGENTGATE_API_BASE_URL ?? DEFAULT_API_BASE_URL,
+            runId: input.runId,
+            status: "failed"
+          }),
+          completion_instructions:
+            "After executing the approved skill body, call the completion command. If execution fails, call the failure command with a short summary."
         },
         execution_packet: executionPacket
       }
@@ -284,6 +297,15 @@ function buildClaudeContinueCommand(input: { apiBaseUrl: string; runId: string; 
     "pnpm exec agentgate claude continue",
     `--run-id ${shellQuote(input.runId)}`,
     `--token ${shellQuote(input.token)}`
+  ].join(" ");
+}
+
+function buildClaudeCompletionCommand(input: { apiBaseUrl: string; runId: string; status: "completed" | "failed" }) {
+  return [
+    `AGENTGATE_API_BASE_URL=${shellQuote(input.apiBaseUrl)}`,
+    "pnpm exec agentgate claude complete",
+    `--run-id ${shellQuote(input.runId)}`,
+    `--status ${shellQuote(input.status)}`
   ].join(" ");
 }
 
@@ -388,6 +410,7 @@ async function appendExecutionLog(
     tenantId: string;
     workspaceId: string;
     skillRunId: string;
+    level?: "debug" | "info" | "warn" | "error" | undefined;
     message: string;
     metadata: Record<string, unknown>;
   }
@@ -404,7 +427,7 @@ async function appendExecutionLog(
       workspaceId: input.workspaceId,
       skillRunId: input.skillRunId,
       sequence: (latest?.sequence ?? 0) + 1,
-      level: "info",
+      level: input.level ?? "info",
       message: input.message,
       metadata: input.metadata as Prisma.InputJsonValue
     }

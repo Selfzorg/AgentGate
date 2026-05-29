@@ -152,6 +152,7 @@ describe("AgentGate skill import recovery scope", () => {
           side_effect_level: "mutating",
           owners: ["service_owner"],
           approver_roles: ["service_owner"],
+          policy_aliases: ["deploy-production"],
           dynamic_shell_blocks: expect.any(Array),
           execution_snapshot: expect.objectContaining({
             version: "agentgate.skill_execution_snapshot.v1",
@@ -202,6 +203,69 @@ describe("AgentGate skill import recovery scope", () => {
         });
         expect(duplicateNameSkills.length).toBe(2);
         expect(new Set(duplicateNameSkills.map((skill) => skill.skillId)).size).toBe(2);
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  it("stores reviewed evidence checks and policy aliases from import review", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createEcommerceProdDeploymentCommand(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+        const candidate = importResponse.json().import_batch.candidates.find((entry: { name: string }) => entry.name === "prod-deployment");
+        expect(candidate.inferred_policy_aliases).toEqual(["deploy-production"]);
+        expect(candidate.inferred_required_checks).toEqual(["tests_passed", "security_scan_passed"]);
+        expect(candidate.required_evidence_raw).toEqual(["automated-testing-report", "security-scan"]);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["service_owner"],
+            approver_roles: ["service_owner"],
+            candidate_reviews: [
+              {
+                candidate_id: candidate.candidate_id,
+                required_checks: ["security-scan", "custom-review"],
+                policy_aliases: ["deploy-production"]
+              }
+            ]
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const importedSkill = await prisma.skill.findFirstOrThrow({
+          where: {
+            tenantId,
+            workspaceId,
+            skillId: "claude_command:repo:claude-commands-ecommerce-prod-deployment"
+          },
+          include: { versions: true }
+        });
+        const config = importedSkill.versions[0]!.config as Record<string, unknown>;
+        expect(config.required_checks).toEqual(["security_scan_passed", "custom_review"]);
+        expect(config.policy_aliases).toEqual(["deploy-production"]);
+        expect(config.required_evidence).toEqual(["automated-testing-report", "security-scan"]);
+        expect(config.evidence_review).toMatchObject({
+          reviewed_required_checks: ["security_scan_passed", "custom_review"],
+          inferred_required_checks: ["tests_passed", "security_scan_passed"],
+          required_evidence_raw: ["automated-testing-report", "security-scan"],
+          warnings: expect.arrayContaining(["Evidence check custom_review requires a custom evidence worker or will remain missing."])
+        });
       } finally {
         await app.close();
       }
@@ -336,8 +400,9 @@ describe("AgentGate skill import recovery scope", () => {
         const decisionBody = decision.json();
         expect(decisionBody.skill_id).toContain("skill-001");
         expect(decisionBody.skill_version).toMatch(/^import-[a-f0-9]{12}$/);
-        expect(decisionBody.risk_level).toBe("high");
+        expect(decisionBody.risk_level).toBe("critical");
         expect(decisionBody.decision).toBe("REQUIRE_APPROVAL");
+        await markGateChecksPassed(decisionBody.run_id);
 
         const approval = await prisma.approvalRequest.findUniqueOrThrow({
           where: { skillRunId: decisionBody.run_id }
@@ -524,16 +589,75 @@ describe("AgentGate skill import recovery scope", () => {
         expect(decision.statusCode).toBe(200);
         const body = decision.json();
         expect(body.skill_id).toBe("claude_command:repo:claude-commands-ecommerce-prod-deployment");
+        expect(body.risk_level).toBe("critical");
+        expect(body.missing_checks).toEqual(
+          expect.arrayContaining(["ci_passed", "tests_passed", "rollback_plan_exists", "staging_deploy_successful", "security_scan_passed"])
+        );
         const run = await prisma.skillRun.findUniqueOrThrow({
-          where: { id: body.run_id }
+          where: { id: body.run_id },
+          include: {
+            gateCheckResults: true,
+            evidenceTasks: true,
+            approvalRequest: true
+          }
         });
         expect(run.resolvedSkillSnapshot).toMatchObject({
           resolver_source: "imported_registry",
+          policy_aliases: ["deploy-production"],
+          required_checks: ["tests_passed", "security_scan_passed"],
           source_fingerprint: {
             source_type: "claude_command",
             path: ".claude/commands/ecommerce/prod-deployment.md"
           }
         });
+        expect(run.policySnapshot).toMatchObject({
+          matched_policy_id: "production_deploy_requires_approval",
+          policy_required_checks: ["ci_passed", "tests_passed", "rollback_plan_exists", "staging_deploy_successful"],
+          imported_required_checks: ["tests_passed", "security_scan_passed"],
+          required_checks: ["ci_passed", "tests_passed", "rollback_plan_exists", "staging_deploy_successful", "security_scan_passed"]
+        });
+        expect(run.gateCheckResults.map((check) => check.checkKey).sort()).toEqual([
+          "ci_passed",
+          "rollback_plan_exists",
+          "security_scan_passed",
+          "staging_deploy_successful",
+          "tests_passed"
+        ]);
+        expect(run.evidenceTasks.map((task) => task.checkKey).sort()).toEqual([
+          "ci_passed",
+          "rollback_plan_exists",
+          "security_scan_passed",
+          "staging_deploy_successful",
+          "tests_passed"
+        ]);
+        expect(run.approvalRequest?.approvalReadiness).toBe("collecting");
+        const blockedApproval = await app.inject({
+          method: "POST",
+          url: `/api/v1/approvals/${run.approvalRequest!.id}/approve`,
+          payload: {
+            comment: "Evidence is not done yet."
+          }
+        });
+        expect(blockedApproval.statusCode).toBe(400);
+        expect(blockedApproval.json().missing_checks).toEqual(expect.arrayContaining(["security_scan_passed"]));
+
+        await markGateChecksPassed(body.run_id);
+        const missingComment = await app.inject({
+          method: "POST",
+          url: `/api/v1/approvals/${run.approvalRequest!.id}/approve`,
+          payload: {}
+        });
+        expect(missingComment.statusCode).toBe(400);
+        expect(missingComment.json().error).toContain("Critical approvals require");
+
+        const approved = await app.inject({
+          method: "POST",
+          url: `/api/v1/approvals/${run.approvalRequest!.id}/approve`,
+          payload: {
+            comment: "Production deploy evidence reviewed."
+          }
+        });
+        expect(approved.statusCode).toBe(200);
         expect(body.decision).toBe("REQUIRE_APPROVAL");
       } finally {
         await app.close();
@@ -646,6 +770,9 @@ async function createEcommerceProdDeploymentCommand(workspace: string) {
       "  - Bash(vercel deploy:*)",
       "owners: devops-team",
       "approver_roles: release-manager",
+      "required_evidence:",
+      "  - automated-testing-report",
+      "  - security-scan",
       "---",
       "",
       "Execute the ecommerce production deployment after AgentGate approval.",
@@ -698,4 +825,24 @@ async function createMcpFixtures(workspace: string) {
 
 function workspaceIdForTenant(tenantId: string) {
   return `workspace_${tenantId}`;
+}
+
+async function markGateChecksPassed(runId: string) {
+  await prisma.gateCheckResult.updateMany({
+    where: { skillRunId: runId },
+    data: {
+      status: "passed",
+      evidence: {
+        source: "test",
+        status: "passed"
+      }
+    }
+  });
+  await prisma.approvalRequest.update({
+    where: { skillRunId: runId },
+    data: {
+      approvalReadiness: "ready",
+      missingChecks: []
+    }
+  });
 }

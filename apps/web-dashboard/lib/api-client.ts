@@ -133,6 +133,10 @@ export type SkillImportCandidate = {
   preferred_runtimes: string[];
   warnings: string[];
   metadata: Record<string, unknown>;
+  inferred_policy_aliases?: string[];
+  inferred_required_checks?: string[];
+  required_evidence_raw?: string[];
+  evidence_warnings?: string[];
   review_status: string;
   imported_skill_record_id: string | null;
   imported_skill_version_id: string | null;
@@ -894,6 +898,11 @@ export async function approveSkillImportBatch(
   batchId: string,
   input: {
     candidateIds?: string[];
+    candidateReviews?: Array<{
+      candidateId: string;
+      requiredChecks?: string[];
+      policyAliases?: string[];
+    }>;
     owners?: string[];
     approverRoles?: string[];
     comment?: string;
@@ -904,6 +913,11 @@ export async function approveSkillImportBatch(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       candidate_ids: input.candidateIds,
+      candidate_reviews: input.candidateReviews?.map((review) => ({
+        candidate_id: review.candidateId,
+        required_checks: review.requiredChecks,
+        policy_aliases: review.policyAliases
+      })),
       owners: input.owners,
       approver_roles: input.approverRoles,
       comment: input.comment

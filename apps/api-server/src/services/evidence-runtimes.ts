@@ -55,6 +55,7 @@ type EvidenceRuntimeAdapter = {
 const passByDefaultChecks = new Set([
   "ci_passed",
   "tests_passed",
+  "security_scan_passed",
   "rollback_plan_exists",
   "staging_deploy_successful"
 ]);
@@ -178,6 +179,13 @@ export function subagentForCheck(checkKey: string): EvidenceSubagent {
       id: "subagent_test_evidence",
       role: "Test evidence subagent",
       description: "Finds the test verification skill and verifies the latest test outcome."
+    };
+  }
+  if (checkKey === "security_scan_passed") {
+    return {
+      id: "subagent_security_evidence",
+      role: "Security evidence subagent",
+      description: "Finds security-scan evidence for the target service."
     };
   }
   if (checkKey === "rollback_plan_exists") {
@@ -347,6 +355,10 @@ function directiveForCheck(context: Record<string, unknown>, checkKey: string, a
 function directiveFromObservedContext(context: Record<string, unknown>, checkKey: string): EvidenceDirective | null {
   if (checkKey === "ci_passed") return triStateDirective(context.ci_status, "passed", "CI status passed.", "CI status did not pass.");
   if (checkKey === "tests_passed") return triStateDirective(context.tests_status, "passed", "Tests passed.", "Tests did not pass.");
+  if (checkKey === "security_scan_passed") {
+    if (context.security_scan_passed === true) return { status: "passed", reason: "Security scan passed." };
+    return triStateDirective(context.security_scan, "passed", "Security scan passed.", "Security scan did not pass.");
+  }
   if (checkKey === "rollback_plan_exists") {
     return triStateDirective(context.rollback_plan, "exists", "Rollback plan exists.", "Rollback plan is missing.");
   }

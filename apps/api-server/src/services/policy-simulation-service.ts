@@ -8,6 +8,7 @@ import { resolveSkill } from "@agentgate/skill-resolver";
 import type { PrismaClient } from "@prisma/client";
 import { normalizeActionRequest } from "./action-request-schema";
 import { previewGateChecks } from "./gate-check-service";
+import { mergeRequiredChecks } from "./imported-skill-governance";
 import { loadActivePolicyRules } from "./policy-registry-service";
 import {
   resolveImportedRegistrySkill,
@@ -73,15 +74,18 @@ export async function simulatePolicyRisk({
     rules: policyRules,
     role: request.agent.role,
     skill_id: resolvedSkill.skill_id,
+    skill_aliases: resolvedSkill.policy_aliases,
     risk_level: risk.risk_level,
     context: request.context
   });
+  const importedRequiredChecks = Array.isArray(resolvedSkill.required_checks) ? resolvedSkill.required_checks : [];
+  const requiredChecks = mergeRequiredChecks(policy.required_checks, importedRequiredChecks);
   const mode = governanceModeFromContext(request.context);
   const effectiveDecision = mode === "enforce" ? policy.decision : "ALLOW";
 
   const gateChecks = previewGateChecks({
     skillId: resolvedSkill.skill_id,
-    requiredChecks: policy.required_checks,
+    requiredChecks,
     context: request.context
   });
   const missingChecks = gateChecks
@@ -146,7 +150,9 @@ export async function simulatePolicyRisk({
           priority: policy.matched_policy.priority,
           decision: policy.matched_policy.decision,
           reason: policy.matched_policy.reason,
-          required_checks: policy.required_checks,
+          policy_required_checks: policy.required_checks,
+          imported_required_checks: importedRequiredChecks,
+          required_checks: requiredChecks,
           approvers: policy.approvers
         }
       : null,

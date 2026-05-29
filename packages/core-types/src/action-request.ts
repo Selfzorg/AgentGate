@@ -32,6 +32,7 @@ export type NormalizedActionRequest = {
     ci_status?: "passed" | "failed" | "unknown";
     tests_status?: "passed" | "failed" | "unknown";
     security_scan?: "passed" | "failed" | "unknown";
+    security_scan_passed?: boolean;
     rollback_plan?: "exists" | "missing" | "unknown";
     staging_deploy?: "success" | "failed" | "unknown";
     dry_run_completed?: boolean;

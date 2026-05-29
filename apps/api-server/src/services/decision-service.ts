@@ -11,6 +11,7 @@ import { createOrUpdateApprovalRequest } from "./approval-service";
 import { collectEvidenceForRun } from "./evidence-collection-service";
 import { createGateCheckResults } from "./gate-check-service";
 import { createId } from "./id";
+import { mergeRequiredChecks } from "./imported-skill-governance";
 import { loadActivePolicyRules } from "./policy-registry-service";
 import { resolveImportedRegistrySkill } from "./registry-resolution-service";
 
@@ -79,9 +80,12 @@ export function createDecisionService({
         rules: policyRules,
         role: request.agent.role,
         skill_id: resolvedSkill.skill_id,
+        skill_aliases: resolvedSkill.policy_aliases,
         risk_level: risk.risk_level,
         context: request.context
       });
+      const importedRequiredChecks = Array.isArray(resolvedSkill.required_checks) ? resolvedSkill.required_checks : [];
+      const requiredChecks = mergeRequiredChecks(policy.required_checks, importedRequiredChecks);
       const mode = governanceModeFromContext(request.context);
       const effectiveDecision = mode === "enforce" ? policy.decision : "ALLOW";
       const effectiveReason =
@@ -119,8 +123,8 @@ export function createDecisionService({
           : Promise.resolve(null)
       ]);
 
-      const shouldCollectEvidence = mode === "enforce" && policy.decision === "REQUIRE_APPROVAL" && policy.required_checks.length > 0;
-      const missingChecks = shouldCollectEvidence ? policy.required_checks : missingChecksForRequest(policy.required_checks, request.context);
+      const shouldCollectEvidence = mode === "enforce" && policy.decision === "REQUIRE_APPROVAL" && requiredChecks.length > 0;
+      const missingChecks = shouldCollectEvidence ? requiredChecks : missingChecksForRequest(requiredChecks, request.context);
       const status = statusForDecision(effectiveDecision);
 
       await prisma.$transaction(async (tx) => {
@@ -148,7 +152,9 @@ export function createDecisionService({
             policy_decision: policy.decision,
             decision: effectiveDecision,
             mode,
-            required_checks: policy.required_checks,
+            policy_required_checks: policy.required_checks,
+            imported_required_checks: importedRequiredChecks,
+            required_checks: requiredChecks,
             approvers: policy.approvers,
             missing_checks: missingChecks,
             rules_source: policyRules === fixtures.policies.rules ? "fixture_fallback" : "database"
@@ -164,13 +170,13 @@ export function createDecisionService({
           data: skillRunData
         });
 
-        if (policy.required_checks.length > 0) {
+        if (requiredChecks.length > 0) {
           await createGateCheckResults(tx, {
             tenantId: request.tenant_id,
             workspaceId: request.workspace_id,
             skillRunId: runId,
             skillId: resolvedSkill.skill_id,
-            requiredChecks: policy.required_checks,
+            requiredChecks,
             context: request.context,
             mode: shouldCollectEvidence ? "pending" : "context"
           });
@@ -189,7 +195,9 @@ export function createDecisionService({
             evidence: {
               policy: policy.matched_policy?.policy_id ?? null,
               reason: effectiveReason,
-              required_checks: policy.required_checks,
+              policy_required_checks: policy.required_checks,
+              imported_required_checks: importedRequiredChecks,
+              required_checks: requiredChecks,
               resolved_skill: resolvedSkill,
               risk
             }
@@ -230,7 +238,7 @@ export function createDecisionService({
               ...auditMetadataBase,
               stage: "policy_evaluated"
             }),
-            ...(mode === "enforce" && policy.required_checks.length > 0
+            ...(mode === "enforce" && requiredChecks.length > 0
               ? [
                   auditEventData(request, runId, traceId, 5, "prerequisites.checked", {
                     ...auditMetadataBase,
@@ -240,7 +248,7 @@ export function createDecisionService({
               : []),
             ...(mode === "enforce" && policy.decision === "REQUIRE_APPROVAL"
               ? [
-                  auditEventData(request, runId, traceId, policy.required_checks.length > 0 ? 6 : 5, "approval.requested", {
+                  auditEventData(request, runId, traceId, requiredChecks.length > 0 ? 6 : 5, "approval.requested", {
                     ...auditMetadataBase,
                     stage: "approval_requested"
                   })
@@ -301,6 +309,7 @@ function missingChecksForRequest(requiredChecks: string[], context: Record<strin
 function checkIsSatisfied(check: string, context: Record<string, unknown>): boolean {
   if (check === "ci_passed") return context.ci_status === "passed";
   if (check === "tests_passed") return context.tests_status === "passed";
+  if (check === "security_scan_passed") return context.security_scan_passed === true || context.security_scan === "passed";
   if (check === "rollback_plan_exists") return context.rollback_plan === "exists";
   if (check === "staging_deploy_successful") return context.staging_deploy === "success";
   if (check === "dry_run_completed") return context.dry_run_completed === true;

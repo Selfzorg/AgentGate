@@ -142,7 +142,8 @@ export const AGENTGATE_TOOL_DEFINITIONS: AgentGateToolDefinition[] = [
   },
   {
     name: "agentgate_execute_approved_run",
-    description: "Issue a scoped execution token and queue an already-approved AgentGate run without real external side effects.",
+    description:
+      "Issue a scoped execution token and queue an already-approved AgentGate run without real external side effects. Imported Claude skills must use the agentgate claude continue/complete commands instead.",
     inputSchema: {
       run_id: z.string(),
       approval_id: z.string().optional(),

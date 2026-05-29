@@ -10,6 +10,7 @@ import {
   type SkillRegistrySourceType
 } from "@agentgate/skill-registry";
 import type { PrismaClient } from "@prisma/client";
+import { normalizeRequiredChecks } from "./imported-skill-governance";
 
 export type ImportedRegistryResolution = {
   selected: (RegistryResolutionMatch & { skillVersionId: string; skillVersion: string; category: string }) | null;
@@ -66,6 +67,8 @@ export async function resolveImportedRegistrySkill(
       resolver_reason: `Action resolved from imported registry metadata via ${selected.matchedField}.`,
       resolver_source: "imported_registry",
       matched_field: selected.matchedField,
+      policy_aliases: stringArray(configForCandidate(selected.candidate).policy_aliases),
+      required_checks: normalizeRequiredChecks(configForCandidate(selected.candidate).required_checks),
       source_fingerprint: {
         source_type: selected.candidate.sourceType,
         path: selected.candidate.relativePath,
@@ -182,6 +185,10 @@ function withVersionMetadata(match: RegistryResolutionMatch, candidates: SkillRe
     skillVersion,
     category
   };
+}
+
+function configForCandidate(candidate: SkillRegistryCandidate) {
+  return recordFrom(recordFrom(candidate.metadata).config);
 }
 
 function sourceTypeFor(value: string): SkillRegistrySourceType {

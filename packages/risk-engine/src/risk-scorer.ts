@@ -68,9 +68,10 @@ export function scoreRisk({
 }): RiskScoreResult {
   const reasons: string[] = [];
   const lowerAction = rawAction.toLowerCase();
-  let score = baseScores[resolvedSkill.skill_id] ?? riskLevelBaseScores[resolvedSkill.default_risk_level] ?? 50;
+  const scoreSource = baseScoreSourceFor(resolvedSkill);
+  let score = scoreSource.score;
 
-  reasons.push(`Base score ${score} for ${resolvedSkill.skill_id}.`);
+  reasons.push(`Base score ${score} for ${scoreSource.skillId}.`);
 
   if (context.environment === "production") {
     score += 10;
@@ -131,5 +132,22 @@ export function scoreRisk({
     risk_score,
     risk_level: classifyRiskScore(risk_score),
     risk_reasons: reasons
+  };
+}
+
+function baseScoreSourceFor(resolvedSkill: ResolvedSkill): { skillId: string; score: number } {
+  const aliases = Array.isArray(resolvedSkill.policy_aliases) ? resolvedSkill.policy_aliases : [];
+  for (const skillId of [resolvedSkill.skill_id, ...aliases]) {
+    const score = baseScores[skillId];
+    if (score === undefined) continue;
+    return {
+      skillId,
+      score
+    };
+  }
+
+  return {
+    skillId: resolvedSkill.skill_id,
+    score: riskLevelBaseScores[resolvedSkill.default_risk_level] ?? 50
   };
 }

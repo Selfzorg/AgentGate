@@ -42,6 +42,7 @@ const defaultPreferredRuntimes: EvidenceRuntimeId[] = ["codex_cli", "claude_code
 const builtInEvidenceSkills: Record<string, Omit<EvidenceSkillDefinition, "registrySource">> = {
   ci_passed: builtIn("ci_passed", "verify-ci-status", "Verify CI Status", "connector_github_demo"),
   tests_passed: builtIn("tests_passed", "verify-tests-passed", "Verify Tests Passed", "connector_github_demo"),
+  security_scan_passed: builtIn("security_scan_passed", "verify-security-scan", "Verify Security Scan", "connector_github_demo"),
   rollback_plan_exists: builtIn("rollback_plan_exists", "verify-rollback-plan", "Verify Rollback Plan", "connector_deployment_demo"),
   staging_deploy_successful: builtIn(
     "staging_deploy_successful",

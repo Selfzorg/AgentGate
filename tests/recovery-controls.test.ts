@@ -294,15 +294,22 @@ describe("recovery controls for policy, evidence, and execution", () => {
           }
         });
         expect(decision.decision).toBe("REQUIRE_APPROVAL");
+        await processEvidenceTasksOnce({
+          prisma,
+          skillRunId: decision.run_id,
+          limit: 50,
+          agentId: "hash_guard_worker"
+        });
 
         const approval = await prisma.approvalRequest.findUniqueOrThrow({
           where: { skillRunId: decision.run_id }
         });
-        await approveRequest(prisma, {
+        const approved = await approveRequest(prisma, {
           approvalId: approval.id,
           actorId: "user_service_owner",
           comment: "Imported skill approved before disable."
         });
+        expect(approved.status).toBe(200);
         const token = await app.inject({
           method: "POST",
           url: "/api/v1/execution-tokens",
@@ -312,6 +319,7 @@ describe("recovery controls for policy, evidence, and execution", () => {
             include_token_value: true
           }
         });
+        expect(token.statusCode).toBe(201);
 
         const skill = await prisma.skill.findFirstOrThrow({
           where: {
