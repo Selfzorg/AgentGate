@@ -63,6 +63,16 @@ describe("AgentGate skill import recovery scope", () => {
       expect(deployCandidate?.warnings).toEqual(expect.arrayContaining(["Dynamic shell block detected; review generated commands and side effects."]));
       expect(deployCandidate?.metadata.supporting_files).toEqual(expect.arrayContaining(["scripts/deploy.sh"]));
       expect(deployCandidate?.metadata.dynamic_shell_block_count).toBe(1);
+      expect((deployCandidate?.metadata.execution_snapshot as Record<string, unknown>).body).toContain("vercel deploy --prod");
+      expect((deployCandidate?.metadata.execution_snapshot as Record<string, unknown>).entrypoint_content_hash).toMatch(/^sha256:/);
+      expect((deployCandidate?.metadata.execution_snapshot as Record<string, unknown>).supporting_files).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: "scripts/deploy.sh",
+            content: expect.stringContaining("vercel deploy --prod")
+          })
+        ])
+      );
 
       await writeFile(
         join(workspace, ".agents", "skills", "skill-001", "scripts", "deploy.sh"),
@@ -143,6 +153,16 @@ describe("AgentGate skill import recovery scope", () => {
           owners: ["service_owner"],
           approver_roles: ["service_owner"],
           dynamic_shell_blocks: expect.any(Array),
+          execution_snapshot: expect.objectContaining({
+            version: "agentgate.skill_execution_snapshot.v1",
+            body: expect.stringContaining("vercel deploy --prod"),
+            supporting_files: expect.arrayContaining([
+              expect.objectContaining({
+                path: "scripts/deploy.sh",
+                content: expect.stringContaining("vercel deploy --prod")
+              })
+            ])
+          }),
           supporting_file_count: expect.any(Number),
           import_batch_id: importBody.import_batch.id
         });

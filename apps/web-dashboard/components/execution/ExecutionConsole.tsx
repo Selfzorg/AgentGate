@@ -264,10 +264,12 @@ export function ExecutionConsole({ runId }: { runId: string }) {
           <KeyRound className="h-4 w-4" aria-hidden="true" />
           {pendingAction === "Issue Execution Token" ? "Issuing" : "Issue Execution Token"}
         </Button>
-        <Button variant="accent" disabled={!canExecute} onClick={() => void handleExecute()}>
-          <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-          {pendingAction === "Execute Through AgentGate" ? "Queueing" : "Execute Through AgentGate"}
-        </Button>
+        {isClaudeImportedRun ? null : (
+          <Button variant="accent" disabled={!canExecute} onClick={() => void handleExecute()}>
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+            {pendingAction === "Execute Through AgentGate" ? "Queueing" : "Execute Through AgentGate"}
+          </Button>
+        )}
         <Button variant="secondary" disabled={!run} onClick={openLogs}>
           <Radio className="h-4 w-4" aria-hidden="true" />
           Open Live Logs
@@ -284,6 +286,11 @@ export function ExecutionConsole({ runId }: { runId: string }) {
 
       {claudeHandoffDisabledReason ? (
         <p className="mt-3 text-xs text-muted">Continue in Claude unavailable: {claudeHandoffDisabledReason}</p>
+      ) : null}
+      {isClaudeImportedRun ? (
+        <p className="mt-3 text-xs text-muted">
+          Imported Claude skills execute through Continue in Claude so Claude Code receives the approved skill body.
+        </p>
       ) : null}
       <p className="mt-4 text-sm text-muted">{status}</p>
       <div className="mt-5 overflow-hidden rounded-ui border border-border">

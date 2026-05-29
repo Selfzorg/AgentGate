@@ -5,6 +5,8 @@ import { createId } from "./id";
 import { executionTokenRequired, hashExecutionToken, scopesForSkill } from "./execution-token-service";
 import { recordFrom, resolvedSkillId, stringFrom } from "./object-utils";
 
+const CLAUDE_IMPORTED_SOURCE_TYPES = new Set(["claude_skill", "claude_command", "claude_subagent"]);
+
 export type QueueExecutionInput = {
   runId: string;
   executionTokenId?: string | undefined;
@@ -81,6 +83,15 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
       await emitExecutionRejected(tx, run, fingerprintError);
       return { status: 409 as const, body: { error: fingerprintError } };
     }
+    if (claudeImportedSourceType(run.resolvedSkillSnapshot)) {
+      await emitExecutionRejected(tx, run, "Imported Claude skills must execute through Continue in Claude");
+      return {
+        status: 409 as const,
+        body: {
+          error: "Imported Claude skills must execute through Continue in Claude so Claude Code receives and executes the approved skill body"
+        }
+      };
+    }
     const tokenRequired = executionTokenRequired(run);
     let executionToken: ExecutionToken | null = null;
     let credentialMode: "bearer" | "legacy_token_id" | "not_required" = "not_required";
@@ -96,7 +107,7 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
         return { status: 403 as const, body: { error: "Raw bearer execution token is required for token-gated execution" } };
       }
 
-      const validation = await validateExecutionToken(tx, {
+      const validation = await validateExecutionTokenCredential(tx, {
         tokenId: input.executionTokenId,
         rawToken: input.executionToken,
         runId: run.id,
@@ -256,13 +267,18 @@ export function validateApprovedSkillFingerprint(run: {
   return null;
 }
 
+function claudeImportedSourceType(snapshot: unknown) {
+  const sourceType = stringFrom(recordFrom(recordFrom(snapshot).source_fingerprint).source_type);
+  return sourceType ? CLAUDE_IMPORTED_SOURCE_TYPES.has(sourceType) : false;
+}
+
 function legacyTokenIdExecutionAllowed() {
   if (process.env.AGENTGATE_ALLOW_LEGACY_TOKEN_ID === "true") return true;
   if (process.env.AGENTGATE_ALLOW_LEGACY_TOKEN_ID === "false") return false;
   return process.env.NODE_ENV === "test";
 }
 
-async function validateExecutionToken(
+export async function validateExecutionTokenCredential(
   prisma: Prisma.TransactionClient,
   input: {
     tokenId?: string | undefined;

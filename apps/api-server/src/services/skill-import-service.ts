@@ -625,6 +625,7 @@ function skillVersionConfig(
     supporting_file_count: numberFrom(metadata.supporting_file_count),
     supporting_file_bytes: numberFrom(metadata.supporting_file_bytes),
     dynamic_shell_blocks: Array.isArray(metadata.dynamic_shell_blocks) ? metadata.dynamic_shell_blocks : [],
+    execution_snapshot: recordFrom(metadata.execution_snapshot),
     tags: tagsForCandidate(candidate),
     import_batch_id: input.batchId,
     import_candidate_id: candidate.candidateId,

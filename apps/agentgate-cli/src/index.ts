@@ -71,11 +71,49 @@ async function runClaudeContinue(args: string[]) {
   }
 
   const handoff = isRecord(body.claude_handoff) ? body.claude_handoff : {};
-  const execution = isRecord(body.execution) ? body.execution : {};
-  console.log("AgentGate Claude handoff verified");
+  const packet = isRecord(body.execution_packet) ? body.execution_packet : {};
+  const skill = isRecord(packet.skill) ? packet.skill : {};
+  const approvedAction = isRecord(packet.approved_action) ? packet.approved_action : {};
+  const safety = isRecord(packet.safety) ? packet.safety : {};
+
+  console.log("AgentGate Claude execution packet verified");
   console.log(`Run: ${options.runId}`);
-  console.log(`Status: ${String(handoff.status ?? execution.status ?? "unknown")}`);
+  console.log(`Status: ${String(handoff.status ?? packet.status ?? "unknown")}`);
+  console.log(`Skill: ${String(skill.name ?? skill.skill_id ?? "unknown")}`);
+  console.log(`Skill ID: ${String(skill.skill_id ?? "unknown")}`);
+  console.log(`Skill version: ${String(skill.version ?? "unknown")}`);
+  console.log(`Approved hash: ${String(skill.approved_hash ?? skill.source_hash ?? "unknown")}`);
+  console.log(`Entrypoint hash: ${String(skill.entrypoint_content_hash ?? "unknown")}`);
+  console.log(`Token status: ${String(safety.token_status ?? "unknown")}`);
   if (typeof handoff.logs_url === "string") console.log(`Logs: ${apiBaseUrl}${handoff.logs_url}`);
+  console.log("");
+  console.log("Claude Code instructions:");
+  for (const instruction of Array.isArray(packet.instructions) ? packet.instructions : []) {
+    if (typeof instruction === "string") console.log(`- ${instruction}`);
+  }
+  console.log("");
+  console.log("Approved raw action:");
+  console.log(String(approvedAction.raw_action ?? ""));
+  console.log("");
+  console.log("Approved context:");
+  console.log(JSON.stringify(approvedAction.context ?? {}, null, 2));
+  console.log("");
+  console.log("Approved skill body to execute:");
+  console.log("```markdown");
+  console.log(String(skill.body ?? ""));
+  console.log("```");
+  const supportingFiles = Array.isArray(skill.supporting_files) ? skill.supporting_files : [];
+  if (supportingFiles.length > 0) {
+    console.log("");
+    console.log("Approved supporting files:");
+    for (const file of supportingFiles) {
+      if (!isRecord(file)) continue;
+      console.log(`--- ${String(file.path ?? "supporting-file")} ---`);
+      console.log(String(file.content ?? ""));
+    }
+  }
+  console.log("");
+  console.log("Execute the approved skill body now. Do not run a different skill or target.");
 }
 
 function parseSkillScanOptions(args: string[]) {

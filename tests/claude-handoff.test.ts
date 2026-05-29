@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../apps/api-server/src/app";
 import { hashExecutionToken } from "../apps/api-server/src/services/execution-token-service";
-import { executeSkillRun } from "../apps/runner-worker/src/orchestrator/execute-skill-run";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -118,6 +117,17 @@ describe("Claude approved-run handoff", () => {
         });
         expect(storedToken.tokenHash).toBe(hashExecutionToken(rawToken));
 
+        const directExecute = await app.inject({
+          method: "POST",
+          url: `/api/v1/skill-runs/${decisionBody.run_id}/execute`,
+          payload: {
+            execution_token: rawToken,
+            idempotency_key: "claude-handoff-direct-execute"
+          }
+        });
+        expect(directExecute.statusCode).toBe(409);
+        expect(directExecute.json().error).toContain("Continue in Claude");
+
         const continued = await app.inject({
           method: "POST",
           url: `/api/v1/skill-runs/${decisionBody.run_id}/claude-handoff/continue`,
@@ -126,23 +136,32 @@ describe("Claude approved-run handoff", () => {
             idempotency_key: "claude-handoff-test"
           }
         });
-        expect(continued.statusCode).toBe(202);
-        expect(continued.json().claude_handoff.status).toBe("execution_queued");
+        expect(continued.statusCode).toBe(200);
+        const continuedBody = continued.json();
+        expect(continuedBody.claude_handoff.status).toBe("execution_packet_issued");
+        expect(continuedBody.execution_packet.version).toBe("agentgate.claude_execution_packet.v1");
+        expect(continuedBody.execution_packet.skill.body).toContain("vercel deploy --prod --confirm");
+        expect(continuedBody.execution_packet.skill.entrypoint_content_hash).toMatch(/^sha256:/);
+        expect(continuedBody.execution_packet.safety.backend_runner_simulation_used).toBe(false);
 
-        const queuedRun = await prisma.skillRun.findUniqueOrThrow({
+        const handedOffRun = await prisma.skillRun.findUniqueOrThrow({
           where: { id: decisionBody.run_id }
         });
-        expect(queuedRun.status).toBe("execution_queued");
+        expect(handedOffRun.status).toBe("executing");
         await expect(
           prisma.executionToken.findUniqueOrThrow({
             where: { id: storedToken.id }
           })
         ).resolves.toMatchObject({ status: "used" });
 
-        const execution = await executeSkillRun(prisma, decisionBody.run_id);
-        expect(execution.status).toBe("completed");
-        expect(execution.result?.connector).toBe("claude-cli-adapter");
-        expect(execution.result?.summary).toContain("governed handoff simulated");
+        const attempt = await prisma.skillRunAttempt.findFirstOrThrow({
+          where: {
+            skillRunId: decisionBody.run_id,
+            idempotencyKey: "claude-handoff-test"
+          }
+        });
+        expect(attempt.status).toBe("executing");
+        expect(attempt.claimedByRunnerId).toBe("claude-code");
       } finally {
         await app.close();
       }

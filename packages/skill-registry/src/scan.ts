@@ -17,6 +17,9 @@ import type {
 
 const ignoredDirectories = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage"]);
 const maxMarkdownParseBytes = 1_000_000;
+const maxExecutionSnapshotBytes = 256_000;
+const maxSupportingFileSnapshotBytes = 256_000;
+const maxSingleSupportingFileSnapshotBytes = 64_000;
 const maxSupportingFilesInMetadata = 100;
 const knownAgentGateMcpTools = [
   {
@@ -206,10 +209,23 @@ async function candidateFromFile(input: {
   const contentHash = directoryHash?.contentHash ?? markdown.contentHash;
   const runtimePlan = runtimesFor(input.target.sourceType, classification.skillType);
   const warnings = [...classification.warnings];
+  const executionSnapshot = executionSnapshotFor({
+    relativePath: sourceRelativePath,
+    markdown: markdown.contentForParse,
+    body: parsed.body,
+    frontmatter: parsed.frontmatter,
+    sourceHash: contentHash,
+    entrypointContentHash: markdown.contentHash,
+    sourceFileTruncated: markdown.truncated,
+    supportingFiles: directoryHash?.supportingFileSnapshots ?? []
+  });
 
   if (parsed.frontmatter.parse_error) warnings.push(String(parsed.frontmatter.parse_error));
   if (!description) warnings.push("Missing description metadata; review before enabling.");
   if (markdown.truncated) warnings.push(`Large skill file was parsed from the first ${maxMarkdownParseBytes} bytes only.`);
+  if (executionSnapshot.truncated) {
+    warnings.push("Executable skill body snapshot was truncated; live Claude execution requires a smaller skill entrypoint.");
+  }
   if (dynamicShell.blocks.length > 0) {
     warnings.push("Dynamic shell block detected; review generated commands and side effects.");
   }
@@ -245,6 +261,7 @@ async function candidateFromFile(input: {
       supporting_file_bytes: directoryHash?.supportingFileBytes ?? 0,
       dynamic_shell_blocks: dynamicShell.blocks,
       dynamic_shell_block_count: dynamicShell.blocks.length,
+      execution_snapshot: executionSnapshot,
       classification_flags: classificationFlagsFor({
         name,
         description,
@@ -256,6 +273,43 @@ async function candidateFromFile(input: {
       approver_roles: stringListFrom(parsed.frontmatter.approver_roles ?? parsed.frontmatter.approverRoles),
       owners: stringListFrom(parsed.frontmatter.owners)
     }
+  };
+}
+
+function executionSnapshotFor(input: {
+  relativePath: string;
+  markdown: string;
+  body: string;
+  frontmatter: Record<string, unknown>;
+  sourceHash: string;
+  entrypointContentHash: string;
+  sourceFileTruncated: boolean;
+  supportingFiles: Array<{ path: string; content_hash: string; size_bytes: number; content: string }>;
+}) {
+  const markdown = limitTextByBytes(input.markdown, maxExecutionSnapshotBytes);
+  const body = limitTextByBytes(input.body, maxExecutionSnapshotBytes);
+
+  return {
+    version: "agentgate.skill_execution_snapshot.v1",
+    format: "markdown",
+    entrypoint_path: input.relativePath,
+    entrypoint_content: markdown.text,
+    body: body.text,
+    frontmatter: input.frontmatter,
+    source_hash: input.sourceHash,
+    entrypoint_content_hash: input.entrypointContentHash,
+    supporting_files: input.supportingFiles,
+    max_bytes: maxExecutionSnapshotBytes,
+    truncated: input.sourceFileTruncated || markdown.truncated || body.truncated
+  };
+}
+
+function limitTextByBytes(text: string, maxBytes: number) {
+  const buffer = Buffer.from(text, "utf8");
+  if (buffer.length <= maxBytes) return { text, truncated: false };
+  return {
+    text: buffer.subarray(0, maxBytes).toString("utf8"),
+    truncated: true
   };
 }
 
@@ -292,13 +346,16 @@ async function hashSkillDirectory(
   supportingFiles: string[];
   supportingFileCount: number;
   supportingFileBytes: number;
+  supportingFileSnapshots: Array<{ path: string; content_hash: string; size_bytes: number; content: string }>;
   warnings: string[];
 }> {
   const warnings: string[] = [];
   const files = (await collectFiles(skillDirectory, warnings)).sort((left, right) => left.localeCompare(right));
   const hash = createHash("sha256");
   const supportingFiles: string[] = [];
+  const supportingFileSnapshots: Array<{ path: string; content_hash: string; size_bytes: number; content: string }> = [];
   let supportingFileBytes = 0;
+  let supportingSnapshotBytes = 0;
 
   for (const file of files) {
     const fileStat = await stat(file);
@@ -310,6 +367,21 @@ async function hashSkillDirectory(
     if (file !== entryFile) {
       supportingFileBytes += fileStat.size;
       if (supportingFiles.length < maxSupportingFilesInMetadata) supportingFiles.push(relativeFile);
+      if (
+        fileStat.size <= maxSingleSupportingFileSnapshotBytes &&
+        supportingSnapshotBytes + fileStat.size <= maxSupportingFileSnapshotBytes
+      ) {
+        const content = await readTextSupportingFile(file);
+        if (content !== null) {
+          supportingSnapshotBytes += fileStat.size;
+          supportingFileSnapshots.push({
+            path: relativeFile,
+            content_hash: await hashFile(file),
+            size_bytes: fileStat.size,
+            content
+          });
+        }
+      }
     }
   }
 
@@ -322,8 +394,24 @@ async function hashSkillDirectory(
     supportingFiles,
     supportingFileCount: Math.max(files.length - 1, 0),
     supportingFileBytes,
+    supportingFileSnapshots,
     warnings
   };
+}
+
+async function readTextSupportingFile(file: string): Promise<string | null> {
+  try {
+    const content = await readFile(file, "utf8");
+    return content.includes("\u0000") ? null : content;
+  } catch {
+    return null;
+  }
+}
+
+async function hashFile(file: string) {
+  const hash = createHash("sha256");
+  await updateHashFromFile(hash, file);
+  return `sha256:${hash.digest("hex")}`;
 }
 
 async function updateHashFromFile(hash: ReturnType<typeof createHash>, file: string) {
