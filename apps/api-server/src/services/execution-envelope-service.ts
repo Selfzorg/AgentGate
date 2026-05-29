@@ -127,9 +127,15 @@ function redactJsonValue(value: unknown) {
 
 function runtimePlanForSkill(skillId: string, source: string, adapterType: string, execution: unknown) {
   const executionConfig = execution && typeof execution === "object" ? (execution as Record<string, unknown>) : {};
-  const configuredRuntime = typeof executionConfig.runtime === "string" ? executionConfig.runtime : null;
+  const entrypoint = executionConfig.entrypoint && typeof executionConfig.entrypoint === "object" ? (executionConfig.entrypoint as Record<string, unknown>) : {};
+  const configuredRuntime =
+    typeof executionConfig.runtime === "string"
+      ? executionConfig.runtime
+      : typeof entrypoint.runtime === "string"
+        ? entrypoint.runtime
+        : null;
   const configuredConnector = typeof executionConfig.connector_id === "string" ? executionConfig.connector_id : null;
-  const connector = configuredConnector ?? connectorForSkill(skillId);
+  const connector = configuredConnector ?? connectorForRuntime(configuredRuntime) ?? connectorForSkill(skillId);
 
   if (configuredRuntime) {
     return {
@@ -152,4 +158,12 @@ function connectorForSkill(skillId: string) {
   if (skillId === "deploy-production" || skillId === "deploy-staging") return "deployment-demo-connector";
   if (skillId === "run-db-migration" || skillId === "drop-table") return "db-demo-connector";
   return "github-demo-connector";
+}
+
+function connectorForRuntime(runtime: string | null) {
+  if (runtime === "mcp_tool") return "mcp-tool-adapter";
+  if (runtime === "native_connector") return "native-connector-adapter";
+  if (runtime === "claude_cli" || runtime === "claude_code_mcp") return "claude-cli-adapter";
+  if (runtime === "codex_cli" || runtime === "codex_mcp") return "codex-cli-adapter";
+  return null;
 }

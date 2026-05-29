@@ -8,7 +8,7 @@ export type AdapterType = "hook" | "mcp_proxy" | "simulator";
 
 export type Environment = "dev" | "staging" | "production";
 
-export type GovernanceMode = "observe" | "enforce";
+export type GovernanceMode = "observe" | "warn" | "enforce";
 
 export type SkillRunStatus =
   | "requested"

@@ -33,7 +33,7 @@ export type DecisionResponse = {
   reason: string;
   trace_id: string;
   run_id: string;
-  mode: "observe" | "enforce";
+  mode: "observe" | "warn" | "enforce";
   dry_run_required?: boolean;
   missing_checks?: string[];
 };

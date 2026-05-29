@@ -42,7 +42,14 @@ enum Environment {
 
 enum GovernanceMode {
   observe
+  warn
   enforce
+}
+
+enum PolicyPackScope {
+  org
+  workspace
+  repo
 }
 
 enum SkillRunStatus {
@@ -158,28 +165,30 @@ model Tenant {
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
 
-  workspaces            Workspace[]
-  users                 User[]
-  agents                Agent[]
-  skills                Skill[]
-  skillVersions         SkillVersion[]
-  policies              Policy[]
-  policyVersions        PolicyVersion[]
-  connectors            Connector[]
-  skillRuns             SkillRun[]
-  gateCheckResults      GateCheckResult[]
-  approvalRequests      ApprovalRequest[]
-  executionTokens       ExecutionToken[]
-  executionLogs         ExecutionLog[]
-  dryRunResults         DryRunResult[]
-  auditEvents           AuditEvent[]
-  auditArtifacts        AuditArtifact[]
-  skillRunAttempts      SkillRunAttempt[]
-  aiRunAnalyses         AiRunAnalysis[]
-  evidenceTasks         EvidenceTask[]
-  evidenceWorkers       EvidenceWorker[]
-  skillImportBatches    SkillImportBatch[]
-  skillImportCandidates SkillImportCandidate[]
+  workspaces             Workspace[]
+  users                  User[]
+  agents                 Agent[]
+  skills                 Skill[]
+  skillVersions          SkillVersion[]
+  policies               Policy[]
+  policyPacks            PolicyPack[]
+  policyVersions         PolicyVersion[]
+  connectors             Connector[]
+  skillRuns              SkillRun[]
+  gateCheckResults       GateCheckResult[]
+  approvalRequests       ApprovalRequest[]
+  executionTokens        ExecutionToken[]
+  executionLogs          ExecutionLog[]
+  dryRunResults          DryRunResult[]
+  auditEvents            AuditEvent[]
+  auditArtifacts         AuditArtifact[]
+  skillRunAttempts       SkillRunAttempt[]
+  aiRunAnalyses          AiRunAnalysis[]
+  evidenceTasks          EvidenceTask[]
+  evidenceArtifactCaches EvidenceArtifactCache[]
+  evidenceWorkers        EvidenceWorker[]
+  skillImportBatches     SkillImportBatch[]
+  skillImportCandidates  SkillImportCandidate[]
 
   @@map("tenants")
 }
@@ -193,27 +202,29 @@ model Workspace {
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
 
-  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  agents                Agent[]
-  skills                Skill[]
-  skillVersions         SkillVersion[]
-  policies              Policy[]
-  policyVersions        PolicyVersion[]
-  connectors            Connector[]
-  skillRuns             SkillRun[]
-  gateCheckResults      GateCheckResult[]
-  approvalRequests      ApprovalRequest[]
-  executionTokens       ExecutionToken[]
-  executionLogs         ExecutionLog[]
-  dryRunResults         DryRunResult[]
-  auditEvents           AuditEvent[]
-  auditArtifacts        AuditArtifact[]
-  skillRunAttempts      SkillRunAttempt[]
-  aiRunAnalyses         AiRunAnalysis[]
-  evidenceTasks         EvidenceTask[]
-  evidenceWorkers       EvidenceWorker[]
-  skillImportBatches    SkillImportBatch[]
-  skillImportCandidates SkillImportCandidate[]
+  tenant                 Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agents                 Agent[]
+  skills                 Skill[]
+  skillVersions          SkillVersion[]
+  policies               Policy[]
+  policyPacks            PolicyPack[]
+  policyVersions         PolicyVersion[]
+  connectors             Connector[]
+  skillRuns              SkillRun[]
+  gateCheckResults       GateCheckResult[]
+  approvalRequests       ApprovalRequest[]
+  executionTokens        ExecutionToken[]
+  executionLogs          ExecutionLog[]
+  dryRunResults          DryRunResult[]
+  auditEvents            AuditEvent[]
+  auditArtifacts         AuditArtifact[]
+  skillRunAttempts       SkillRunAttempt[]
+  aiRunAnalyses          AiRunAnalysis[]
+  evidenceTasks          EvidenceTask[]
+  evidenceArtifactCaches EvidenceArtifactCache[]
+  evidenceWorkers        EvidenceWorker[]
+  skillImportBatches     SkillImportBatch[]
+  skillImportCandidates  SkillImportCandidate[]
 
   @@unique([tenantId, key])
   @@index([tenantId])
@@ -384,23 +395,48 @@ model SkillImportCandidate {
 }
 
 model Policy {
-  id          String       @id
-  tenantId    String       @map("tenant_id")
-  workspaceId String       @map("workspace_id")
-  policyId    String       @map("policy_id")
-  name        String
-  status      EntityStatus @default(active)
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  id           String       @id
+  tenantId     String       @map("tenant_id")
+  workspaceId  String       @map("workspace_id")
+  policyPackId String?      @map("policy_pack_id")
+  policyId     String       @map("policy_id")
+  name         String
+  status       EntityStatus @default(active)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
 
   tenant           Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workspace        Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  policyPack       PolicyPack?     @relation(fields: [policyPackId], references: [id], onDelete: SetNull)
   versions         PolicyVersion[]
   matchedSkillRuns SkillRun[]      @relation("MatchedPolicyRuns")
 
   @@unique([tenantId, workspaceId, policyId])
   @@index([tenantId, workspaceId, status])
+  @@index([policyPackId])
   @@map("policies")
+}
+
+model PolicyPack {
+  id          String          @id
+  tenantId    String          @map("tenant_id")
+  workspaceId String          @map("workspace_id")
+  packId      String          @map("pack_id")
+  name        String
+  scope       PolicyPackScope @default(workspace)
+  source      String          @default("api")
+  status      EntityStatus    @default(active)
+  config      Json            @default("{}")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  policies  Policy[]
+
+  @@unique([tenantId, workspaceId, packId])
+  @@index([tenantId, workspaceId, scope, status])
+  @@map("policy_packs")
 }
 
 model PolicyVersion {
@@ -715,6 +751,34 @@ model EvidenceWorker {
   @@map("evidence_workers")
 }
 
+model EvidenceArtifactCache {
+  id                 String          @id
+  tenantId           String          @map("tenant_id")
+  workspaceId        String          @map("workspace_id")
+  checkKey           String          @map("check_key")
+  targetIdentityHash String          @map("target_identity_hash")
+  repo               String?
+  commitSha          String?         @map("commit_sha")
+  environment        Environment?
+  status             GateCheckStatus
+  reason             String
+  evidence           Json            @default("{}")
+  confidence         Float           @default(0)
+  sourceTaskId       String?         @map("source_task_id")
+  collectedAt        DateTime        @map("collected_at")
+  expiresAt          DateTime        @map("expires_at")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, workspaceId, checkKey, targetIdentityHash])
+  @@index([tenantId, workspaceId, expiresAt])
+  @@index([repo, commitSha, environment])
+  @@map("evidence_artifact_cache")
+}
+
 model DryRunResult {
   id          String   @id
   tenantId    String   @map("tenant_id")
@@ -736,19 +800,22 @@ model DryRunResult {
 }
 
 model SkillRunAttempt {
-  id               String    @id
-  tenantId         String    @map("tenant_id")
-  workspaceId      String    @map("workspace_id")
-  skillRunId       String    @map("skill_run_id")
-  executionTokenId String?   @map("execution_token_id")
-  idempotencyKey   String    @map("idempotency_key")
-  status           String
-  result           Json      @default("{}")
-  error            Json      @default("{}")
-  startedAt        DateTime? @map("started_at")
-  completedAt      DateTime? @map("completed_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id                String    @id
+  tenantId          String    @map("tenant_id")
+  workspaceId       String    @map("workspace_id")
+  skillRunId        String    @map("skill_run_id")
+  executionTokenId  String?   @map("execution_token_id")
+  idempotencyKey    String    @map("idempotency_key")
+  status            String
+  result            Json      @default("{}")
+  error             Json      @default("{}")
+  claimedByRunnerId String?   @map("claimed_by_runner_id")
+  leaseExpiresAt    DateTime? @map("lease_expires_at")
+  heartbeatAt       DateTime? @map("heartbeat_at")
+  startedAt         DateTime? @map("started_at")
+  completedAt       DateTime? @map("completed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

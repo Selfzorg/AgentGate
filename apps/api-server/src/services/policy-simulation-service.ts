@@ -8,6 +8,7 @@ import { resolveSkill } from "@agentgate/skill-resolver";
 import type { PrismaClient } from "@prisma/client";
 import { normalizeActionRequest } from "./action-request-schema";
 import { previewGateChecks } from "./gate-check-service";
+import { loadActivePolicyRules } from "./policy-registry-service";
 import {
   resolveImportedRegistrySkill,
   serializeImportedRegistryMatch
@@ -59,13 +60,22 @@ export async function simulatePolicyRisk({
     context: request.context
   });
 
+  const policyRules = prisma
+    ? await loadActivePolicyRules(prisma, {
+        tenantId: request.tenant_id,
+        workspaceId: request.workspace_id,
+        fallbackRules: fixtures.policies.rules
+      })
+    : fixtures.policies.rules;
   const policy = evaluatePolicy({
-    rules: fixtures.policies.rules,
+    rules: policyRules,
     role: request.agent.role,
     skill_id: resolvedSkill.skill_id,
     risk_level: risk.risk_level,
     context: request.context
   });
+  const mode = governanceModeFromContext(request.context);
+  const effectiveDecision = mode === "enforce" ? policy.decision : "ALLOW";
 
   const gateChecks = previewGateChecks({
     skillId: resolvedSkill.skill_id,
@@ -90,6 +100,8 @@ export async function simulatePolicyRisk({
       writes_audit_events: false
     },
     precedence: "DENY > FORCE_DRY_RUN > REQUIRE_APPROVAL > ALLOW",
+    rollout_mode: mode,
+    policy_rules_source: policyRules === fixtures.policies.rules ? "fixture_fallback" : "database",
     action: {
       tenant_id: request.tenant_id,
       workspace_id: request.workspace_id,
@@ -134,18 +146,25 @@ export async function simulatePolicyRisk({
         }
       : null,
     gate_checks: gateChecks,
-    decision: policy.decision,
-    reason: policy.reason,
+    decision: effectiveDecision,
+    policy_decision: policy.decision,
+    reason: mode === "enforce" ? policy.reason : `${mode} mode observed policy decision ${policy.decision}: ${policy.reason}`,
     required_approvers: policy.approvers,
     missing_checks: missingChecks,
-    dry_run_required: policy.decision === "FORCE_DRY_RUN",
+    dry_run_required: effectiveDecision === "FORCE_DRY_RUN",
     explanation: buildExplanation({
-      decision: policy.decision,
-      reason: policy.reason,
+      decision: effectiveDecision,
+      reason: mode === "enforce" ? policy.reason : `${mode} mode observed policy decision ${policy.decision}: ${policy.reason}`,
       policyId: policy.matched_policy?.policy_id ?? null,
       missingChecks
     })
   };
+}
+
+function governanceModeFromContext(context: Record<string, unknown>): "observe" | "warn" | "enforce" {
+  const raw = context.agentgate_policy_mode ?? context.policy_mode ?? context.governance_mode;
+  if (raw === "observe" || raw === "warn" || raw === "enforce") return raw;
+  return "enforce";
 }
 
 function serializeRegistryMatch(match: RegistryResolutionMatch) {

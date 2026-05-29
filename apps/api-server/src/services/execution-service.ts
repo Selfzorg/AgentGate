@@ -3,7 +3,7 @@ import { emitAuditEvent } from "./audit-event-service";
 import { buildExecutionEnvelope } from "./execution-envelope-service";
 import { createId } from "./id";
 import { executionTokenRequired, hashExecutionToken, scopesForSkill } from "./execution-token-service";
-import { resolvedSkillId } from "./object-utils";
+import { recordFrom, resolvedSkillId, stringFrom } from "./object-utils";
 
 export type QueueExecutionInput = {
   runId: string;
@@ -76,6 +76,11 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
     }
 
     const skillId = run.skill?.skillId ?? resolvedSkillId(run.resolvedSkillSnapshot);
+    const fingerprintError = validateApprovedSkillFingerprint(run);
+    if (fingerprintError) {
+      await emitExecutionRejected(tx, run, fingerprintError);
+      return { status: 409 as const, body: { error: fingerprintError } };
+    }
     const tokenRequired = executionTokenRequired(run);
     let executionToken: ExecutionToken | null = null;
     let credentialMode: "bearer" | "legacy_token_id" | "not_required" = "not_required";
@@ -218,6 +223,37 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
       }
     };
   });
+}
+
+function validateApprovedSkillFingerprint(run: {
+  resolvedSkillSnapshot: unknown;
+  skill?: {
+    versions?: Array<{
+      id: string;
+      version: string;
+      status: string;
+      config: unknown;
+    }>;
+  } | null;
+}) {
+  const snapshot = recordFrom(run.resolvedSkillSnapshot);
+  const fingerprint = recordFrom(snapshot.source_fingerprint);
+  const approvedVersionId = stringFrom(fingerprint.skill_version_id);
+  const approvedHash = stringFrom(fingerprint.content_hash);
+  if (!approvedVersionId || !approvedHash) return null;
+
+  const version = run.skill?.versions?.find((candidate) => candidate.id === approvedVersionId);
+  if (!version) return "Approved skill version is no longer present in the registry";
+  if (version.status !== "active") return "Approved skill version is no longer active; re-approval is required";
+
+  const config = recordFrom(version.config);
+  const source = recordFrom(config.source);
+  const currentHash = stringFrom(source.content_hash);
+  if (currentHash && currentHash !== approvedHash) {
+    return "Approved skill version hash changed; re-approval is required";
+  }
+
+  return null;
 }
 
 function legacyTokenIdExecutionAllowed() {

@@ -1,6 +1,11 @@
 import type { PrismaClient } from "@prisma/client";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import {
+  exportPolicyPack,
+  importPolicyPack,
+  listPolicyPacks
+} from "../services/policy-registry-service";
 
 const skillsQuerySchema = z.object({
   source: z.string().optional(),
@@ -10,6 +15,38 @@ const skillsQuerySchema = z.object({
 const skillVersionParamsSchema = z.object({
   id: z.string().min(1),
   version: z.string().min(1)
+});
+
+const tenantWorkspaceQuerySchema = z.object({
+  tenant_id: z.string().min(1).default("tenant_demo"),
+  workspace_id: z.string().min(1).default("workspace_demo")
+});
+
+const policyPackParamsSchema = z.object({
+  pack_id: z.string().min(1)
+});
+
+const policyPackImportSchema = z.object({
+  tenant_id: z.string().min(1).default("tenant_demo"),
+  workspace_id: z.string().min(1).default("workspace_demo"),
+  pack_id: z.string().min(1),
+  name: z.string().min(1),
+  scope: z.enum(["org", "workspace", "repo"]).optional(),
+  source: z.string().min(1).optional(),
+  rollout_mode: z.enum(["observe", "warn", "enforce"]).optional(),
+  imported_by: z.string().min(1).optional(),
+  rules: z.array(
+    z.object({
+      policy_id: z.string().min(1),
+      name: z.string().min(1),
+      priority: z.number().int(),
+      when: z.record(z.unknown()),
+      decision: z.enum(["ALLOW", "DENY", "REQUIRE_APPROVAL", "FORCE_DRY_RUN"]),
+      reason: z.string().min(1),
+      required_checks: z.array(z.string()).optional(),
+      approvers: z.array(z.string()).optional()
+    })
+  )
 });
 
 export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
@@ -127,6 +164,41 @@ export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
         })
       )
     };
+  });
+
+  app.get("/policy-packs", async (request) => {
+    const query = tenantWorkspaceQuerySchema.parse(request.query);
+    return listPolicyPacks(app.services.prisma, {
+      tenantId: query.tenant_id,
+      workspaceId: query.workspace_id
+    });
+  });
+
+  app.post("/policy-packs/import", async (request, reply) => {
+    const body = policyPackImportSchema.parse(request.body);
+    const result = await importPolicyPack(app.services.prisma, {
+      tenantId: body.tenant_id,
+      workspaceId: body.workspace_id,
+      packId: body.pack_id,
+      name: body.name,
+      scope: body.scope,
+      source: body.source,
+      rolloutMode: body.rollout_mode,
+      importedBy: body.imported_by,
+      rules: body.rules
+    });
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.get("/policy-packs/:pack_id/export", async (request, reply) => {
+    const params = policyPackParamsSchema.parse(request.params);
+    const query = tenantWorkspaceQuerySchema.parse(request.query);
+    const result = await exportPolicyPack(app.services.prisma, {
+      tenantId: query.tenant_id,
+      workspaceId: query.workspace_id,
+      packId: params.pack_id
+    });
+    return reply.code(result.status).send(result.body);
   });
 };
 

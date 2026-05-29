@@ -20,9 +20,18 @@ export const normalizedActionRequestSchema = z.object({
   context: z
     .object({
       repo: z.string().optional(),
+      repository: z.string().optional(),
+      repo_url: z.string().optional(),
       branch: z.string().optional(),
+      commit_sha: z.string().optional(),
+      commit: z.string().optional(),
+      head_sha: z.string().optional(),
+      pr_head_sha: z.string().optional(),
       cwd: z.string().optional(),
       environment: z.enum(["dev", "staging", "production"]).optional(),
+      policy_mode: z.enum(["observe", "warn", "enforce"]).optional(),
+      agentgate_policy_mode: z.enum(["observe", "warn", "enforce"]).optional(),
+      governance_mode: z.enum(["observe", "warn", "enforce"]).optional(),
       service: z.string().optional(),
       database: z.string().optional(),
       target_branch: z.string().optional(),

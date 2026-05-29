@@ -11,6 +11,7 @@ import { createOrUpdateApprovalRequest } from "./approval-service";
 import { collectEvidenceForRun } from "./evidence-collection-service";
 import { createGateCheckResults } from "./gate-check-service";
 import { createId } from "./id";
+import { loadActivePolicyRules } from "./policy-registry-service";
 import { resolveImportedRegistrySkill } from "./registry-resolution-service";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -25,7 +26,8 @@ export type DecisionServiceResult = {
   reason: string;
   trace_id: string;
   run_id: string;
-  mode: "observe" | "enforce";
+  mode: "observe" | "warn" | "enforce";
+  policy_decision?: "ALLOW" | "DENY" | "REQUIRE_APPROVAL" | "FORCE_DRY_RUN";
   dry_run_required?: boolean;
   missing_checks?: string[];
 };
@@ -66,13 +68,22 @@ export function createDecisionService({
         context: request.context
       });
 
+      const policyRules = await loadActivePolicyRules(prisma, {
+        tenantId: request.tenant_id,
+        workspaceId: request.workspace_id,
+        fallbackRules: fixtures.policies.rules
+      });
       const policy = evaluatePolicy({
-        rules: fixtures.policies.rules,
+        rules: policyRules,
         role: request.agent.role,
         skill_id: resolvedSkill.skill_id,
         risk_level: risk.risk_level,
         context: request.context
       });
+      const mode = governanceModeFromContext(request.context);
+      const effectiveDecision = mode === "enforce" ? policy.decision : "ALLOW";
+      const effectiveReason =
+        mode === "enforce" ? policy.reason : `${mode} mode observed policy decision ${policy.decision}: ${policy.reason}`;
 
       const [agent, skill, matchedPolicy] = await Promise.all([
         prisma.agent.findUnique({
@@ -106,9 +117,9 @@ export function createDecisionService({
           : Promise.resolve(null)
       ]);
 
-      const shouldCollectEvidence = policy.decision === "REQUIRE_APPROVAL" && policy.required_checks.length > 0;
+      const shouldCollectEvidence = mode === "enforce" && policy.decision === "REQUIRE_APPROVAL" && policy.required_checks.length > 0;
       const missingChecks = shouldCollectEvidence ? policy.required_checks : missingChecksForRequest(policy.required_checks, request.context);
-      const status = statusForDecision(policy.decision);
+      const status = statusForDecision(effectiveDecision);
 
       await prisma.$transaction(async (tx) => {
         const skillRunData: Prisma.SkillRunUncheckedCreateInput = {
@@ -119,23 +130,26 @@ export function createDecisionService({
           source: prismaAgentSource(request.source),
           adapterType: request.adapter_type,
           rawAction: request.raw_action,
-          mode: "enforce",
-          decision: policy.decision,
+          mode,
+          decision: effectiveDecision,
           riskLevel: risk.risk_level,
           riskScore: risk.risk_score,
           riskReasons: risk.risk_reasons as Prisma.InputJsonValue,
           context: request.context as Prisma.InputJsonValue,
           requestedAt: request.requested_at ? new Date(request.requested_at) : new Date(),
           status,
-          reason: policy.reason,
+          reason: effectiveReason,
           resolvedSkillSnapshot: resolvedSkill as Prisma.InputJsonValue,
           policySnapshot: {
             matched_policy_id: policy.matched_policy?.policy_id ?? null,
-            reason: policy.reason,
-            decision: policy.decision,
+            reason: effectiveReason,
+            policy_decision: policy.decision,
+            decision: effectiveDecision,
+            mode,
             required_checks: policy.required_checks,
             approvers: policy.approvers,
-            missing_checks: missingChecks
+            missing_checks: missingChecks,
+            rules_source: policyRules === fixtures.policies.rules ? "fixture_fallback" : "database"
           } as Prisma.InputJsonValue
         };
 
@@ -160,7 +174,7 @@ export function createDecisionService({
           });
         }
 
-        if (policy.decision === "REQUIRE_APPROVAL") {
+        if (mode === "enforce" && policy.decision === "REQUIRE_APPROVAL") {
           await createOrUpdateApprovalRequest(tx, {
             tenantId: request.tenant_id,
             workspaceId: request.workspace_id,
@@ -172,7 +186,7 @@ export function createDecisionService({
             approvalReadiness: shouldCollectEvidence ? "collecting" : undefined,
             evidence: {
               policy: policy.matched_policy?.policy_id ?? null,
-              reason: policy.reason,
+              reason: effectiveReason,
               required_checks: policy.required_checks,
               resolved_skill: resolvedSkill,
               risk
@@ -188,8 +202,10 @@ export function createDecisionService({
           resolved_skill: resolvedSkill,
           risk_score: risk.risk_score,
           risk_level: risk.risk_level,
-          decision: policy.decision,
-          reason: policy.reason,
+          decision: effectiveDecision,
+          policy_decision: policy.decision,
+          mode,
+          reason: effectiveReason,
           policy_matched: policy.matched_policy?.policy_id ?? null,
           missing_checks: missingChecks
         };
@@ -212,7 +228,7 @@ export function createDecisionService({
               ...auditMetadataBase,
               stage: "policy_evaluated"
             }),
-            ...(policy.required_checks.length > 0
+            ...(mode === "enforce" && policy.required_checks.length > 0
               ? [
                   auditEventData(request, runId, traceId, 5, "prerequisites.checked", {
                     ...auditMetadataBase,
@@ -220,7 +236,7 @@ export function createDecisionService({
                   })
                 ]
               : []),
-            ...(policy.decision === "REQUIRE_APPROVAL"
+            ...(mode === "enforce" && policy.decision === "REQUIRE_APPROVAL"
               ? [
                   auditEventData(request, runId, traceId, policy.required_checks.length > 0 ? 6 : 5, "approval.requested", {
                     ...auditMetadataBase,
@@ -245,17 +261,18 @@ export function createDecisionService({
       }
 
       return {
-        decision: policy.decision,
+        decision: effectiveDecision,
         skill_id: resolvedSkill.skill_id,
         skill_version: resolvedSkill.skill_version,
         risk_level: risk.risk_level,
         risk_score: risk.risk_score,
         risk_reasons: risk.risk_reasons,
-        reason: policy.reason,
+        reason: effectiveReason,
         trace_id: traceId,
         run_id: runId,
-        mode: "enforce",
-        ...(policy.decision === "FORCE_DRY_RUN" ? { dry_run_required: true } : {}),
+        mode,
+        ...(effectiveDecision !== policy.decision ? { policy_decision: policy.decision } : {}),
+        ...(effectiveDecision === "FORCE_DRY_RUN" ? { dry_run_required: true } : {}),
         ...(finalMissingChecks.length > 0 ? { missing_checks: finalMissingChecks } : {})
       };
     }
@@ -267,6 +284,12 @@ function statusForDecision(decision: DecisionServiceResult["decision"]) {
   if (decision === "DENY") return "denied";
   if (decision === "FORCE_DRY_RUN") return "dry_run_required";
   return "approval_required";
+}
+
+function governanceModeFromContext(context: Record<string, unknown>): "observe" | "warn" | "enforce" {
+  const raw = context.agentgate_policy_mode ?? context.policy_mode ?? context.governance_mode;
+  if (raw === "observe" || raw === "warn" || raw === "enforce") return raw;
+  return "enforce";
 }
 
 function missingChecksForRequest(requiredChecks: string[], context: Record<string, unknown>): string[] {

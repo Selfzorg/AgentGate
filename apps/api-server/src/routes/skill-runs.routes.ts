@@ -2,6 +2,11 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { serializeAnalysis } from "../services/ai-run-analysis-service";
 import { runDryRun } from "../services/dry-run-service";
+import {
+  claimExecutionLease,
+  completeExecutionLease,
+  heartbeatExecutionLease
+} from "../services/execution-lease-service";
 import { queueSkillRunExecution } from "../services/execution-service";
 
 const runParamsSchema = z.object({
@@ -12,6 +17,18 @@ const executeBodySchema = z.object({
   execution_token_id: z.string().optional(),
   execution_token: z.string().min(1).optional(),
   idempotency_key: z.string().min(1)
+});
+
+const leaseClaimBodySchema = z.object({
+  runner_id: z.string().min(1),
+  lease_seconds: z.number().int().positive().max(900).optional()
+});
+
+const leaseCompleteBodySchema = z.object({
+  runner_id: z.string().min(1),
+  status: z.enum(["completed", "failed"]),
+  result: z.record(z.unknown()).optional(),
+  error: z.record(z.unknown()).optional()
 });
 
 export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
@@ -146,6 +163,9 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
           execution_token_id: attempt.executionTokenId,
           idempotency_key: attempt.idempotencyKey,
           status: attempt.status,
+          claimed_by_runner_id: attempt.claimedByRunnerId,
+          lease_expires_at: attempt.leaseExpiresAt?.toISOString() ?? null,
+          heartbeat_at: attempt.heartbeatAt?.toISOString() ?? null,
           result: attempt.result,
           error: attempt.error,
           started_at: attempt.startedAt?.toISOString() ?? null,
@@ -210,6 +230,41 @@ export const registerSkillRunsRoutes: FastifyPluginAsync = async (app) => {
       allowRetry: true
     });
 
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/skill-runs/:run_id/execution-lease/claim", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const body = leaseClaimBodySchema.parse(request.body);
+    const result = await claimExecutionLease(app.services.prisma, {
+      runId,
+      runnerId: body.runner_id,
+      leaseSeconds: body.lease_seconds
+    });
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/skill-runs/:run_id/execution-lease/heartbeat", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const body = leaseClaimBodySchema.parse(request.body);
+    const result = await heartbeatExecutionLease(app.services.prisma, {
+      runId,
+      runnerId: body.runner_id,
+      leaseSeconds: body.lease_seconds
+    });
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/skill-runs/:run_id/execution-lease/complete", async (request, reply) => {
+    const { run_id: runId } = runParamsSchema.parse(request.params);
+    const body = leaseCompleteBodySchema.parse(request.body);
+    const result = await completeExecutionLease(app.services.prisma, {
+      runId,
+      runnerId: body.runner_id,
+      status: body.status,
+      result: body.result,
+      error: body.error
+    });
     return reply.code(result.status).send(result.body);
   });
 };

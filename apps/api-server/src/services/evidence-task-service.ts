@@ -1,5 +1,9 @@
 import { Prisma, type EvidenceTask, type PrismaClient } from "@prisma/client";
 import { emitAuditEvent } from "./audit-event-service";
+import {
+  findReusableEvidenceArtifact,
+  upsertEvidenceArtifactCache
+} from "./evidence-artifact-cache-service";
 import { executeEvidenceRuntime, subagentForCheck } from "./evidence-runtimes";
 import {
   allowedRuntimesForTask,
@@ -76,7 +80,14 @@ export async function createEvidenceTasksForRun({
         check,
         attempt: await nextTaskAttempt(prisma, check.id),
         evidenceSkill,
-        selectedRuntime: preferredRuntime(evidenceSkill, context, check.checkKey)
+        selectedRuntime: preferredRuntime(evidenceSkill, context, check.checkKey),
+        cachedEvidence: await findReusableEvidenceArtifact(prisma, {
+          tenantId: run.tenantId,
+          workspaceId: run.workspaceId,
+          checkKey: check.checkKey,
+          context: run.context,
+          environment: run.environment
+        })
       };
     })
   );
@@ -117,6 +128,44 @@ export async function createEvidenceTasksForRun({
 
     const tasks: EvidenceTask[] = [];
     for (const plan of plans) {
+      if (plan.cachedEvidence) {
+        await tx.gateCheckResult.update({
+          where: { id: plan.check.id },
+          data: {
+            status: plan.cachedEvidence.status,
+            evidence: {
+              source: "evidence_cache",
+              status: plan.cachedEvidence.status,
+              reason: plan.cachedEvidence.reason,
+              cached_artifact_id: plan.cachedEvidence.id,
+              collected_at: plan.cachedEvidence.collected_at,
+              expires_at: plan.cachedEvidence.expires_at,
+              confidence: plan.cachedEvidence.confidence,
+              target_identity: plan.cachedEvidence.target_identity,
+              details: plan.cachedEvidence.evidence,
+              evidence_skill: evidenceSkillSnapshot(plan.evidenceSkill)
+            } as Prisma.InputJsonValue
+          }
+        });
+
+        await emitAuditEvent(tx, {
+          tenantId: run.tenantId,
+          workspaceId: run.workspaceId,
+          skillRunId: run.id,
+          traceId: run.traceId,
+          eventType: "evidence.cache.reused",
+          actorType: "system",
+          actorId: requestedBy,
+          metadata: {
+            check_key: plan.check.checkKey,
+            cached_artifact_id: plan.cachedEvidence.id,
+            target_identity: plan.cachedEvidence.target_identity,
+            status: plan.cachedEvidence.status
+          }
+        });
+        continue;
+      }
+
       await tx.evidenceTask.updateMany({
         where: {
           gateCheckResultId: plan.check.id,
@@ -179,20 +228,14 @@ export async function createEvidenceTasksForRun({
       });
     }
 
-    const allChecks = await tx.gateCheckResult.findMany({
-      where: { skillRunId: run.id },
-      orderBy: { checkKey: "asc" }
-    });
-    const missingChecks = allChecks.filter((check) => check.status !== "passed").map((check) => check.checkKey);
-    const approval = await tx.approvalRequest.findUniqueOrThrow({
-      where: { id: run.approvalRequest!.id }
-    });
+    const readiness = await updateApprovalReadiness(tx, run.id);
+    const approval = readiness.approval ?? (await tx.approvalRequest.findUniqueOrThrow({ where: { id: run.approvalRequest!.id } }));
 
     return {
       approval,
-      gateChecks: allChecks,
+      gateChecks: readiness.gateChecks,
       tasks,
-      missingChecks
+      missingChecks: readiness.missingChecks
     };
   });
 
@@ -714,6 +757,18 @@ async function finishEvidenceTask(
         status: input.gateStatus,
         evidence: evidence as Prisma.InputJsonValue
       }
+    });
+
+    await upsertEvidenceArtifactCache(tx, {
+      tenantId: task.tenantId,
+      workspaceId: task.workspaceId,
+      checkKey: task.checkKey,
+      context: task.skillRun.context,
+      environment: task.skillRun.environment,
+      status: input.gateStatus,
+      reason: input.reason,
+      evidence,
+      sourceTaskId: task.id
     });
 
     const readiness = await updateApprovalReadiness(tx, task.skillRunId);

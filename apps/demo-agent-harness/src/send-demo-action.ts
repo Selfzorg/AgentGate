@@ -12,7 +12,7 @@ export async function sendDemoAction(request: NormalizedActionRequest, options: 
     skill_id: string;
     trace_id: string;
     run_id: string;
-    mode: "observe" | "enforce";
+    mode: "observe" | "warn" | "enforce";
   };
 }
 

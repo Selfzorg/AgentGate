@@ -34,16 +34,20 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
 
   const attempt = run.skillRunAttempts[0] ?? null;
   const skillId = run.skill?.skillId ?? resolvedSkillId(run.resolvedSkillSnapshot);
-  const connectorName = connectorNameForSkill(skillId);
+  const connectorName = connectorNameForRun(run.resolvedSkillSnapshot, skillId);
   const token = run.executionTokens[0] ?? null;
   const scopes = Array.isArray(token?.scopes) ? token.scopes.filter((scope): scope is string => typeof scope === "string") : [];
 
   if (attempt) {
+    const now = new Date();
     await prisma.skillRunAttempt.update({
       where: { id: attempt.id },
       data: {
         status: "executing",
-        startedAt: attempt.startedAt ?? new Date()
+        claimedByRunnerId: "in_process_runner",
+        leaseExpiresAt: new Date(now.getTime() + 60_000),
+        heartbeatAt: now,
+        startedAt: attempt.startedAt ?? now
       }
     });
   }
@@ -75,14 +79,14 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
         status: "failed",
         summary: controls.reason,
         metadata: controls.metadata
-      });
+      }, connectorName);
     }
 
     for (const log of plannedLogs(run.rawAction, skillId, connectorName, scopes)) {
       await appendLogAndAudit(prisma, run, log.level, log.message, log.metadata);
     }
 
-    const connector = connectorForSkill(skillId);
+    const connector = connectorForRun(run.resolvedSkillSnapshot, skillId, connectorName);
     const input: SkillInput = {
       skill_id: skillId,
       raw_action: run.rawAction,
@@ -95,7 +99,7 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
         status: "failed",
         summary: "Connector input validation failed.",
         metadata: { errors: validation.errors }
-      });
+      }, connectorName);
     }
 
     const result = await connector.execute(input, {
@@ -109,7 +113,7 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
     });
 
     if (result.status === "failed") {
-      return markRunFailed(prisma, run, attempt?.id ?? null, result);
+      return markRunFailed(prisma, run, attempt?.id ?? null, result, connectorName);
     }
 
     await appendLogAndAudit(prisma, run, "info", result.summary, {
@@ -126,6 +130,8 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
         data: {
           status: "completed",
           result: attemptResult as Prisma.InputJsonValue,
+          leaseExpiresAt: null,
+          heartbeatAt: new Date(),
           completedAt: new Date()
         }
       });
@@ -161,7 +167,7 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
     return markRunFailed(prisma, run, attempt?.id ?? null, {
       status: "failed",
       summary: error instanceof Error ? error.message : "Connector execution failed."
-    });
+    }, connectorName);
   }
 }
 
@@ -176,10 +182,11 @@ async function markRunFailed(
     resolvedSkillSnapshot: unknown;
   },
   attemptId: string | null,
-  result: ExecutionResult
+  result: ExecutionResult,
+  connectorName = connectorNameForSkill(run.skill?.skillId ?? resolvedSkillId(run.resolvedSkillSnapshot))
 ) {
   const skillId = run.skill?.skillId ?? resolvedSkillId(run.resolvedSkillSnapshot);
-  const normalized = normalizeExecutionResult(run.id, skillId, connectorNameForSkill(skillId), result);
+  const normalized = normalizeExecutionResult(run.id, skillId, connectorName, result);
 
   await appendLogAndAudit(prisma, run, "error", result.summary, {
     result_status: "failed",
@@ -192,6 +199,8 @@ async function markRunFailed(
       data: {
         status: "failed",
         error: normalized as Prisma.InputJsonValue,
+        leaseExpiresAt: null,
+        heartbeatAt: new Date(),
         completedAt: new Date()
       }
     });
@@ -319,10 +328,71 @@ function connectorForSkill(skillId: string): SkillConnector {
   return githubDemoConnector;
 }
 
+function connectorForRun(snapshot: unknown, skillId: string, connectorName: string): SkillConnector {
+  if (importedSourceType(snapshot)) return headlessAgentAdapterConnector(connectorName, importedSourceType(snapshot)!);
+  return connectorForSkill(skillId);
+}
+
 function connectorNameForSkill(skillId: string): string {
   if (skillId === "deploy-production" || skillId === "deploy-staging") return "deployment-demo-connector";
   if (skillId === "run-db-migration" || skillId === "drop-table") return "db-demo-connector";
   return "github-demo-connector";
+}
+
+function connectorNameForRun(snapshot: unknown, skillId: string): string {
+  const sourceType = importedSourceType(snapshot);
+  if (sourceType === "mcp_tool") return "mcp-tool-adapter";
+  if (sourceType === "native_connector") return "native-connector-adapter";
+  if (sourceType === "claude_skill" || sourceType === "claude_command" || sourceType === "claude_subagent") return "claude-cli-adapter";
+  if (sourceType === "codex_skill") return "codex-cli-adapter";
+  return connectorNameForSkill(skillId);
+}
+
+function importedSourceType(snapshot: unknown): string | null {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  const sourceFingerprint = (snapshot as { source_fingerprint?: unknown }).source_fingerprint;
+  if (!sourceFingerprint || typeof sourceFingerprint !== "object" || Array.isArray(sourceFingerprint)) return null;
+  const value = (sourceFingerprint as { source_type?: unknown }).source_type;
+  return typeof value === "string" ? value : null;
+}
+
+function headlessAgentAdapterConnector(connectorName: string, sourceType: string): SkillConnector {
+  return {
+    async validateInputs(input) {
+      if (input.raw_action.trim().length === 0) return { valid: false, errors: ["raw_action is required"] };
+      return { valid: true, errors: [] };
+    },
+    async dryRun() {
+      return {
+        summary: `${connectorName} dry-run is represented by the approved AgentGate envelope.`,
+        artifacts: []
+      };
+    },
+    async execute(input, context) {
+      if (process.env.AGENTGATE_ENABLE_LIVE_AGENT_ADAPTERS === "true") {
+        return {
+          status: "failed",
+          summary: `${connectorName} live adapter is intentionally not enabled in the MVP runtime.`,
+          metadata: {
+            connector: connectorName,
+            source_type: sourceType,
+            skill_run_id: context.skill_run_id
+          }
+        };
+      }
+
+      return {
+        status: "completed",
+        summary: `${connectorName} governed handoff simulated for imported ${sourceType} skill.`,
+        metadata: {
+          connector: connectorName,
+          source_type: sourceType,
+          live_adapter_enabled: false,
+          original_action: input.raw_action
+        }
+      };
+    }
+  };
 }
 
 function normalizeExecutionResult(

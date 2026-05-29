@@ -14,6 +14,7 @@ async function cleanDatabase() {
     prisma.auditArtifact.deleteMany(),
     prisma.auditEvent.deleteMany(),
     prisma.skillRunAttempt.deleteMany(),
+    prisma.evidenceArtifactCache.deleteMany(),
     prisma.dryRunResult.deleteMany(),
     prisma.executionLog.deleteMany(),
     prisma.executionToken.deleteMany(),
@@ -22,6 +23,7 @@ async function cleanDatabase() {
     prisma.skillRun.deleteMany(),
     prisma.policyVersion.deleteMany(),
     prisma.policy.deleteMany(),
+    prisma.policyPack.deleteMany(),
     prisma.skillVersion.deleteMany(),
     prisma.skill.deleteMany(),
     prisma.connector.deleteMany(),
@@ -102,6 +104,23 @@ async function main() {
     });
   }
 
+  const demoPolicyPack = await prisma.policyPack.create({
+    data: {
+      id: "policy_pack_demo_defaults",
+      tenantId: tenant.id,
+      workspaceId: workspace.id,
+      packId: "org-defaults",
+      name: "AgentGate Org Defaults",
+      scope: "org",
+      source: "configs/demo-policies.yaml",
+      config: {
+        fixture: true,
+        rollout_mode: "enforce",
+        precedence: "DENY > FORCE_DRY_RUN > REQUIRE_APPROVAL > ALLOW"
+      }
+    }
+  });
+
   const skillRecordIds = new Map<string, string>();
   for (const skill of fixtures.skills.skills) {
     const skillRecord = await prisma.skill.create({
@@ -150,6 +169,7 @@ async function main() {
         id: `policy_${rule.policy_id}`,
         tenantId: tenant.id,
         workspaceId: workspace.id,
+        policyPackId: demoPolicyPack.id,
         policyId: rule.policy_id,
         name: rule.name
       }
