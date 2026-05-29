@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -48,9 +48,11 @@ describe("AgentGate skill import recovery scope", () => {
       const firstScan = await scanAgentSkills({ rootDir: workspace });
       expect(firstScan.summary.total).toBeGreaterThanOrEqual(62);
       expect(firstScan.summary.bySourceType.codex_skill).toBe(52);
+      expect(firstScan.summary.bySourceType.claude_skill).toBe(1);
       expect(firstScan.summary.bySourceType.claude_command).toBeGreaterThanOrEqual(2);
       expect(firstScan.summary.bySourceType.claude_subagent).toBe(1);
       expect(firstScan.summary.bySourceType.mcp_tool).toBeGreaterThanOrEqual(9);
+      expect(firstScan.summary.bySourceType.native_connector).toBeGreaterThanOrEqual(1);
       expect(firstScan.duplicateGroups.some((group) => group.normalizedName === "shared-release-helper")).toBe(true);
       expect(firstScan.warnings.some((warning) => warning.includes("Skipped symlink"))).toBe(true);
       expect(firstScan.candidates.some((candidate) => candidate.warnings.some((warning) => warning.includes("local tool metadata is unavailable")))).toBe(true);
@@ -58,10 +60,13 @@ describe("AgentGate skill import recovery scope", () => {
       const deployCandidate = firstScan.candidates.find((candidate) => candidate.relativePath.includes("skill-001/SKILL.md"));
       expect(deployCandidate?.contentHash).toMatch(/^sha256:/);
       expect(deployCandidate?.warnings).toEqual(expect.arrayContaining(["Mutating skill requires owner and policy review before enablement."]));
+      expect(deployCandidate?.warnings).toEqual(expect.arrayContaining(["Dynamic shell block detected; review generated commands and side effects."]));
+      expect(deployCandidate?.metadata.supporting_files).toEqual(expect.arrayContaining(["scripts/deploy.sh"]));
+      expect(deployCandidate?.metadata.dynamic_shell_block_count).toBe(1);
 
       await writeFile(
-        join(workspace, ".agents", "skills", "skill-001", "SKILL.md"),
-        await readFile(join(workspace, ".agents", "skills", "skill-001", "SKILL.md"), "utf8") + "\nChanged hash input.\n",
+        join(workspace, ".agents", "skills", "skill-001", "scripts", "deploy.sh"),
+        "#!/usr/bin/env bash\nvercel deploy --prod --confirm\n",
         "utf8"
       );
       const secondScan = await scanAgentSkills({ rootDir: workspace });
@@ -137,6 +142,8 @@ describe("AgentGate skill import recovery scope", () => {
           side_effect_level: "mutating",
           owners: ["service_owner"],
           approver_roles: ["service_owner"],
+          dynamic_shell_blocks: expect.any(Array),
+          supporting_file_count: expect.any(Number),
           import_batch_id: importBody.import_batch.id
         });
         expect((config.source as Record<string, unknown>).path).toContain("skill-001/SKILL.md");
@@ -379,6 +386,7 @@ async function createCodexSkillSet(workspace: string, count: number) {
     const id = `skill-${String(index).padStart(3, "0")}`;
     const dir = join(workspace, ".agents", "skills", id);
     await mkdir(dir, { recursive: true });
+    if (index === 1) await mkdir(join(dir, "scripts"), { recursive: true });
     const duplicateName = index === 50 || index === 51 ? "Shared Release Helper" : `Imported Skill ${index}`;
     const mutatingText = index === 1 ? "Deploy checkout-api to production using vercel deploy --prod." : "Inspect project state and summarize findings.";
     const tools = index === 1 ? "tools: Bash(vercel deploy:*)" : "tools: Read, Grep";
@@ -391,16 +399,28 @@ async function createCodexSkillSet(workspace: string, count: number) {
         tools,
         "---",
         "",
-        mutatingText
+        mutatingText,
+        ...(index === 1
+          ? [
+              "",
+              "```bash",
+              "vercel deploy --prod --confirm",
+              "```"
+            ]
+          : [])
       ].join("\n"),
       "utf8"
     );
+    if (index === 1) {
+      await writeFile(join(dir, "scripts", "deploy.sh"), "#!/usr/bin/env bash\nvercel deploy --prod\n", "utf8");
+    }
   }
 }
 
 async function createClaudeFixtures(workspace: string) {
   await mkdir(join(workspace, ".claude", "commands", "checks"), { recursive: true });
   await mkdir(join(workspace, ".claude", "agents"), { recursive: true });
+  await mkdir(join(workspace, ".claude", "skills", "release-auditor"), { recursive: true });
   await writeFile(
     join(workspace, ".claude", "commands", "checks", "verify-ci.md"),
     ["---", "description: Verify CI status", "allowed-tools: Read, Grep, Bash(git status:*)", "---", "", "Read CI status only."].join("\n"),
@@ -414,6 +434,11 @@ async function createClaudeFixtures(workspace: string) {
   await writeFile(
     join(workspace, ".claude", "agents", "release-reviewer.md"),
     ["---", "description: Review release readiness", "tools: Read, Grep", "---", "", "Check release readiness."].join("\n"),
+    "utf8"
+  );
+  await writeFile(
+    join(workspace, ".claude", "skills", "release-auditor", "SKILL.md"),
+    ["---", "name: Release Auditor", "description: Verify production release evidence.", "tools: Read, Grep", "---", "", "Read-only evidence check."].join("\n"),
     "utf8"
   );
 }
@@ -440,6 +465,18 @@ async function createMcpFixtures(workspace: string) {
   await writeFile(
     join(workspace, ".codex", "config.toml"),
     ['[mcp_servers.agentgate]', 'command = "pnpm"', 'args = ["mcp:start"]', "", "[mcp_servers.internal]"].join("\n"),
+    "utf8"
+  );
+  await mkdir(join(workspace, ".agentgate", "connectors"), { recursive: true });
+  await writeFile(
+    join(workspace, ".agentgate", "connectors", "github-merge.json"),
+    JSON.stringify({
+      connector_id: "github-merge",
+      name: "GitHub Merge Connector",
+      description: "Merge pull requests through a native connector.",
+      operations: ["merge_pr"],
+      scopes: ["git:merge"]
+    }),
     "utf8"
   );
 }

@@ -13,8 +13,16 @@ const mutatingToolPatterns = [
   /bash/i,
   /mcp(__|\.|:).*(merge|deploy|apply|create|delete|drop|truncate|migrate)/i
 ];
-const highRiskTextPatterns = [/\bprod(?:uction)?\b/i, /\bdeploy\b/i, /\bmerge\b/i, /\bmigrate\b/i, /\bpush\b/i];
-const criticalTextPatterns = [/\bdrop\b/i, /\btruncate\b/i, /\bdestroy\b/i, /\bdelete\b/i, /\bforce\b/i];
+const highRiskTextPatterns = [
+  /\bprod(?:uction)?\b/i,
+  /\bdeploy\b/i,
+  /\bmerge\b/i,
+  /\bmigrate\b/i,
+  /\bpush\b/i,
+  /\bwrite\b/i,
+  /\bedit\b/i
+];
+const criticalTextPatterns = [/\bdrop\b/i, /\btruncate\b/i, /\bdestroy\b/i, /\bdelete\b/i, /\bforce\b/i, /\bremove\b/i];
 const evidenceTextPatterns = [/\bevidence\b/i, /\bverify\b/i, /\bcheck\b/i, /\bread[- ]only\b/i, /\bstatus\b/i];
 
 export type SkillClassificationInput = {
@@ -105,6 +113,7 @@ function warningsFor(input: {
   const warnings: string[] = [];
   if (input.declaredTools.length === 0) warnings.push("No declared tool allowlist found; classification is inferred.");
   if (input.hasHighRiskText || input.hasCriticalText) warnings.push("High-risk language detected in skill content.");
+  if (input.hasCriticalText) warnings.push("Destructive language detected; default risk is critical until reviewed.");
   if (input.sideEffectLevel === "mutating") warnings.push("Mutating skill requires owner and policy review before enablement.");
   return warnings;
 }

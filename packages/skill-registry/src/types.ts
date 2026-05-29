@@ -1,5 +1,6 @@
 export type SkillRegistrySourceType =
   | "codex_skill"
+  | "claude_skill"
   | "claude_command"
   | "claude_subagent"
   | "mcp_tool"
@@ -55,6 +56,7 @@ export type ScanAgentSkillsInput = {
   rootDir: string;
   includeUserScopes?: boolean | undefined;
   userCodexSkillsDir?: string | undefined;
+  userClaudeSkillsDir?: string | undefined;
   userClaudeCommandsDir?: string | undefined;
   userClaudeAgentsDir?: string | undefined;
 };

@@ -178,7 +178,14 @@ function withVersionMetadata(match: RegistryResolutionMatch, candidates: SkillRe
 }
 
 function sourceTypeFor(value: string): SkillRegistrySourceType {
-  if (value === "claude_command" || value === "claude_subagent" || value === "mcp_tool" || value === "native_connector" || value === "demo_fixture") {
+  if (
+    value === "claude_skill" ||
+    value === "claude_command" ||
+    value === "claude_subagent" ||
+    value === "mcp_tool" ||
+    value === "native_connector" ||
+    value === "demo_fixture"
+  ) {
     return value;
   }
   return "codex_skill";

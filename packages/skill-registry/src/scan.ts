@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { classifySkillCandidate } from "./classifier";
 import { parseMarkdownFrontmatter, stringFrom, stringListFrom } from "./frontmatter";
 import type {
@@ -16,6 +17,7 @@ import type {
 
 const ignoredDirectories = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage"]);
 const maxMarkdownParseBytes = 1_000_000;
+const maxSupportingFilesInMetadata = 100;
 const knownAgentGateMcpTools = [
   {
     tool: "agentgate_run_tests",
@@ -56,7 +58,7 @@ const knownAgentGateMcpTools = [
 
 type DiscoveryTarget = {
   rootDir: string;
-  pattern: "codex_skill" | "markdown";
+  pattern: "skill_directory" | "markdown";
   sourceType: SkillRegistrySourceType;
   scope: SkillRegistryScope;
 };
@@ -65,11 +67,12 @@ export async function scanAgentSkills(input: ScanAgentSkillsInput): Promise<Scan
   const rootDir = resolve(input.rootDir);
   const warnings: string[] = [];
   const targets = discoveryTargets(rootDir, input);
-  const [candidateGroups, mcpCandidates] = await Promise.all([
+  const [candidateGroups, mcpCandidates, nativeConnectorCandidates] = await Promise.all([
     Promise.all(targets.map((target) => scanTarget(target, rootDir, warnings))),
-    scanMcpConfigs(rootDir, warnings)
+    scanMcpConfigs(rootDir, warnings),
+    scanNativeConnectorManifests(rootDir, warnings)
   ]);
-  const scannedCandidates = [...candidateGroups.flat(), ...mcpCandidates].sort((left, right) =>
+  const scannedCandidates = [...candidateGroups.flat(), ...mcpCandidates, ...nativeConnectorCandidates].sort((left, right) =>
     left.relativePath.localeCompare(right.relativePath)
   );
   const duplicateGroups = duplicateGroupsFor(scannedCandidates);
@@ -97,8 +100,14 @@ function discoveryTargets(rootDir: string, input: ScanAgentSkillsInput): Discove
   const targets: DiscoveryTarget[] = [
     {
       rootDir: join(rootDir, ".agents", "skills"),
-      pattern: "codex_skill",
+      pattern: "skill_directory",
       sourceType: "codex_skill",
+      scope: "repo"
+    },
+    {
+      rootDir: join(rootDir, ".claude", "skills"),
+      pattern: "skill_directory",
+      sourceType: "claude_skill",
       scope: "repo"
     },
     {
@@ -119,8 +128,14 @@ function discoveryTargets(rootDir: string, input: ScanAgentSkillsInput): Discove
     targets.push(
       {
         rootDir: input.userCodexSkillsDir ?? join(homedir(), ".codex", "skills"),
-        pattern: "codex_skill",
+        pattern: "skill_directory",
         sourceType: "codex_skill",
+        scope: "user"
+      },
+      {
+        rootDir: input.userClaudeSkillsDir ?? join(homedir(), ".claude", "skills"),
+        pattern: "skill_directory",
+        sourceType: "claude_skill",
         scope: "user"
       },
       {
@@ -147,7 +162,7 @@ async function scanTarget(target: DiscoveryTarget, workspaceRoot: string, warnin
 
   const files = await collectFiles(target.rootDir, warnings);
   const matchingFiles = files.filter((file) => {
-    if (target.pattern === "codex_skill") return basename(file) === "SKILL.md";
+    if (target.pattern === "skill_directory") return basename(file) === "SKILL.md";
     return file.endsWith(".md");
   });
 
@@ -168,8 +183,12 @@ async function candidateFromFile(input: {
   workspaceRoot: string;
 }): Promise<SkillRegistryCandidate> {
   const markdown = await readMarkdownForScan(input.file);
+  const skillDirectory = dirname(input.file);
+  const directoryHash =
+    input.target.pattern === "skill_directory" ? await hashSkillDirectory(skillDirectory, input.file) : null;
   const parsed = parseMarkdownFrontmatter(markdown.contentForParse);
   const declaredTools = declaredToolsFrom(parsed.frontmatter);
+  const dynamicShell = dynamicShellBlocksFrom(parsed.body);
   const sourceRelativePath =
     input.target.scope === "user"
       ? join(userScopePrefix(input.target.sourceType), relative(input.target.rootDir, input.file))
@@ -184,13 +203,19 @@ async function candidateFromFile(input: {
     body: parsed.body,
     declaredTools
   });
-  const contentHash = markdown.contentHash;
+  const contentHash = directoryHash?.contentHash ?? markdown.contentHash;
   const runtimePlan = runtimesFor(input.target.sourceType, classification.skillType);
   const warnings = [...classification.warnings];
 
   if (parsed.frontmatter.parse_error) warnings.push(String(parsed.frontmatter.parse_error));
   if (!description) warnings.push("Missing description metadata; review before enabling.");
   if (markdown.truncated) warnings.push(`Large skill file was parsed from the first ${maxMarkdownParseBytes} bytes only.`);
+  if (dynamicShell.blocks.length > 0) {
+    warnings.push("Dynamic shell block detected; review generated commands and side effects.");
+  }
+  if (directoryHash) {
+    warnings.push(...directoryHash.warnings);
+  }
 
   return {
     id: candidateId(input.target.sourceType, input.target.scope, sourceRelativePath, contentHash),
@@ -211,8 +236,25 @@ async function candidateFromFile(input: {
     warnings,
     metadata: {
       frontmatter: parsed.frontmatter,
-      source_directory: dirname(input.file),
-      content_truncated_for_parse: markdown.truncated
+      source_directory: skillDirectory,
+      content_truncated_for_parse: markdown.truncated,
+      content_file_hash: markdown.contentHash,
+      directory_hash: directoryHash?.contentHash ?? null,
+      supporting_files: directoryHash?.supportingFiles ?? [],
+      supporting_file_count: directoryHash?.supportingFileCount ?? 0,
+      supporting_file_bytes: directoryHash?.supportingFileBytes ?? 0,
+      dynamic_shell_blocks: dynamicShell.blocks,
+      dynamic_shell_block_count: dynamicShell.blocks.length,
+      classification_flags: classificationFlagsFor({
+        name,
+        description,
+        body: parsed.body,
+        declaredTools
+      }),
+      environments: stringListFrom(parsed.frontmatter.environments ?? parsed.frontmatter.environment),
+      required_evidence: stringListFrom(parsed.frontmatter.required_evidence ?? parsed.frontmatter.requiredEvidence),
+      approver_roles: stringListFrom(parsed.frontmatter.approver_roles ?? parsed.frontmatter.approverRoles),
+      owners: stringListFrom(parsed.frontmatter.owners)
     }
   };
 }
@@ -240,6 +282,59 @@ async function collectFiles(rootDir: string, warnings: string[]): Promise<string
     })
   );
   return nested.flat();
+}
+
+async function hashSkillDirectory(
+  skillDirectory: string,
+  entryFile: string
+): Promise<{
+  contentHash: string;
+  supportingFiles: string[];
+  supportingFileCount: number;
+  supportingFileBytes: number;
+  warnings: string[];
+}> {
+  const warnings: string[] = [];
+  const files = (await collectFiles(skillDirectory, warnings)).sort((left, right) => left.localeCompare(right));
+  const hash = createHash("sha256");
+  const supportingFiles: string[] = [];
+  let supportingFileBytes = 0;
+
+  for (const file of files) {
+    const fileStat = await stat(file);
+    const relativeFile = relative(skillDirectory, file);
+    hash.update(`path:${relativeFile}\nsize:${fileStat.size}\n`);
+    await updateHashFromFile(hash, file);
+    hash.update("\n");
+
+    if (file !== entryFile) {
+      supportingFileBytes += fileStat.size;
+      if (supportingFiles.length < maxSupportingFilesInMetadata) supportingFiles.push(relativeFile);
+    }
+  }
+
+  if (files.length - 1 > maxSupportingFilesInMetadata) {
+    warnings.push(`Supporting file metadata was truncated to ${maxSupportingFilesInMetadata} entries.`);
+  }
+
+  return {
+    contentHash: `sha256:${hash.digest("hex")}`,
+    supportingFiles,
+    supportingFileCount: Math.max(files.length - 1, 0),
+    supportingFileBytes,
+    warnings
+  };
+}
+
+async function updateHashFromFile(hash: ReturnType<typeof createHash>, file: string) {
+  return new Promise<void>((resolvePromise, reject) => {
+    const stream = createReadStream(file);
+    stream.on("data", (chunk: Buffer | string) => {
+      hash.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    stream.on("error", reject);
+    stream.on("end", () => resolvePromise());
+  });
 }
 
 async function readMarkdownForScan(file: string): Promise<{
@@ -293,6 +388,159 @@ async function scanMcpConfigs(rootDir: string, warnings: string[]): Promise<Skil
   }
 
   return candidates;
+}
+
+async function scanNativeConnectorManifests(rootDir: string, warnings: string[]): Promise<SkillRegistryCandidate[]> {
+  const manifestFiles = await nativeConnectorManifestFiles(rootDir, warnings);
+  const candidateGroups = await Promise.all(manifestFiles.map((file) => candidatesFromNativeConnectorManifest(file, rootDir, warnings)));
+  return candidateGroups.flat();
+}
+
+async function nativeConnectorManifestFiles(rootDir: string, warnings: string[]) {
+  const directFiles = [
+    join(rootDir, "agentgate.connectors.json"),
+    join(rootDir, ".agentgate", "connectors.json"),
+    join(rootDir, ".agentgate", "connector-manifest.json"),
+    join(rootDir, ".agentgate", "connector-manifest.yaml"),
+    join(rootDir, ".agentgate", "connector-manifest.yml")
+  ];
+  const files: string[] = [];
+
+  for (const file of directFiles) {
+    if (await fileExists(file)) files.push(file);
+  }
+
+  const connectorsDir = join(rootDir, ".agentgate", "connectors");
+  if (await directoryExists(connectorsDir)) {
+    const nested = await collectFiles(connectorsDir, warnings);
+    files.push(...nested.filter((file) => [".json", ".yaml", ".yml"].includes(extname(file).toLowerCase())));
+  }
+
+  return [...new Set(files)].sort((left, right) => left.localeCompare(right));
+}
+
+async function candidatesFromNativeConnectorManifest(
+  file: string,
+  rootDir: string,
+  warnings: string[]
+): Promise<SkillRegistryCandidate[]> {
+  const raw = await readFile(file, "utf8");
+  const relativePath = relative(rootDir, file);
+  const parsed = parseStructuredManifest(raw, extname(file));
+
+  if (!parsed.ok) {
+    warnings.push(`Invalid native connector manifest: ${relativePath}`);
+    return [];
+  }
+
+  return connectorEntriesFrom(parsed.value).map((entry, index) =>
+    nativeConnectorCandidate({
+      file,
+      relativePath,
+      manifestHash: hashString(raw),
+      entry,
+      index
+    })
+  );
+}
+
+function parseStructuredManifest(raw: string, extension: string): { ok: true; value: unknown } | { ok: false } {
+  try {
+    if (extension.toLowerCase() === ".json") return { ok: true, value: JSON.parse(raw) };
+    return { ok: true, value: parseYaml(raw) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function connectorEntriesFrom(value: unknown): Array<Record<string, unknown>> {
+  const root = recordFrom(value);
+  const candidates = [
+    root.connectors,
+    root.native_connectors,
+    root.nativeConnectors,
+    root.connector,
+    Object.keys(root).length > 0 ? root : null
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate.map(recordFrom).filter((entry) => Object.keys(entry).length > 0);
+    const record = recordFrom(candidate);
+    if (Object.keys(record).length > 0 && Object.values(record).every((entry) => Object.keys(recordFrom(entry)).length > 0)) {
+      return Object.entries(record).map(([id, entry]) => ({
+        connector_id: id,
+        ...recordFrom(entry)
+      }));
+    }
+    if (Object.keys(record).length > 0 && (record.id || record.connector_id || record.name || record.tools || record.operations)) {
+      return [record];
+    }
+  }
+
+  return [];
+}
+
+function nativeConnectorCandidate(input: {
+  file: string;
+  relativePath: string;
+  manifestHash: string;
+  entry: Record<string, unknown>;
+  index: number;
+}): SkillRegistryCandidate {
+  const connectorId =
+    stringFrom(input.entry.connector_id, input.entry.connectorId, input.entry.id, input.entry.name) ?? `connector-${input.index + 1}`;
+  const sourcePath = `${input.relativePath}#${connectorId}`;
+  const contentHash = hashString(`${input.manifestHash}:${connectorId}:${JSON.stringify(input.entry)}`);
+  const name = stringFrom(input.entry.name, input.entry.title, connectorId) ?? connectorId;
+  const description = stringFrom(input.entry.description) ?? `Native connector "${name}" discovered from local manifest.`;
+  const declaredTools = [
+    ...new Set([
+      ...stringListFrom(input.entry.tools),
+      ...stringListFrom(input.entry.allowed_tools),
+      ...stringListFrom(input.entry.allowedTools),
+      ...stringListFrom(input.entry.operations),
+      ...stringListFrom(input.entry.scopes)
+    ])
+  ];
+  const classification = classifySkillCandidate({
+    sourceType: "native_connector",
+    name,
+    description,
+    body: JSON.stringify(input.entry),
+    declaredTools
+  });
+  const runtimePlan = runtimesFor("native_connector", classification.skillType);
+
+  return {
+    id: candidateId("native_connector", "repo", sourcePath, contentHash),
+    skillId: skillIdFor("native_connector", "repo", sourcePath),
+    name,
+    description,
+    sourceType: "native_connector",
+    scope: "repo",
+    sourcePath: input.file,
+    relativePath: sourcePath,
+    contentHash,
+    declaredTools,
+    skillType: classification.skillType,
+    sideEffectLevel: classification.sideEffectLevel,
+    defaultRiskLevel: classification.defaultRiskLevel,
+    allowedRuntimes: runtimePlan.allowed,
+    preferredRuntimes: runtimePlan.preferred,
+    warnings: [...classification.warnings],
+    metadata: {
+      connector_id: connectorId,
+      manifest_path: input.relativePath,
+      manifest_index: input.index,
+      classification_flags: classificationFlagsFor({
+        name,
+        description,
+        body: JSON.stringify(input.entry),
+        declaredTools
+      }),
+      raw_manifest: input.entry
+    }
+  };
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -504,8 +752,44 @@ function firstParagraph(body: string): string | null {
   return paragraph ? paragraph.slice(0, 240) : null;
 }
 
+function dynamicShellBlocksFrom(body: string): {
+  blocks: Array<{ language: string; preview: string }>;
+} {
+  const blocks = [...body.matchAll(/```(bash|sh|shell|zsh|terminal)\s*\n([\s\S]*?)```/gi)].map((match) => ({
+    language: (match[1] ?? "shell").toLowerCase(),
+    preview: (match[2] ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 5)
+      .join("\n")
+      .slice(0, 500)
+  }));
+
+  return {
+    blocks
+  };
+}
+
+function classificationFlagsFor(input: {
+  name: string;
+  description: string | null;
+  body: string;
+  declaredTools: string[];
+}) {
+  const haystack = [input.name, input.description, input.body, input.declaredTools.join(" ")].filter(Boolean).join("\n");
+
+  return {
+    read_only: /\b(read|inspect|list|grep|verify|check|status)\b/i.test(haystack) && !/\b(write|edit|deploy|merge|delete|drop|truncate)\b/i.test(haystack),
+    simulated: /\b(simulat|dry[- ]run|preview)\b/i.test(haystack),
+    mutating: /\b(write|edit|create|apply|deploy|merge|push|migrate)\b/i.test(haystack),
+    production_capable: /\b(prod|production|live|customer|public)\b/i.test(haystack),
+    destructive: /\b(drop|truncate|destroy|delete|remove|force)\b/i.test(haystack)
+  };
+}
+
 function sourceNameFor(file: string, sourceType: SkillRegistrySourceType): string {
-  if (sourceType === "codex_skill") return basename(dirname(file));
+  if (sourceType === "codex_skill" || sourceType === "claude_skill") return basename(dirname(file));
   return basename(file, ".md");
 }
 
@@ -529,6 +813,15 @@ function runtimesFor(sourceType: SkillRegistrySourceType, skillType: string): { 
     return {
       allowed,
       preferred: ["codex_cli"]
+    };
+  }
+
+  if (sourceType === "claude_skill") {
+    const allowed: SkillRegistryRuntime[] =
+      skillType === "evidence" ? ["claude_cli", "claude_code_mcp", "local_deterministic"] : ["claude_cli", "claude_code_mcp"];
+    return {
+      allowed,
+      preferred: ["claude_cli"]
     };
   }
 
@@ -613,6 +906,7 @@ function recordFrom(value: unknown): Record<string, unknown> {
 
 function userScopePrefix(sourceType: SkillRegistrySourceType): string {
   if (sourceType === "codex_skill") return "~/.codex/skills";
+  if (sourceType === "claude_skill") return "~/.claude/skills";
   if (sourceType === "claude_command") return "~/.claude/commands";
   if (sourceType === "claude_subagent") return "~/.claude/agents";
   return "~";

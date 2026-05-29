@@ -134,9 +134,13 @@ export async function approveRegistryImportBatch(prisma: PrismaClient, input: Ap
 
     for (const candidate of batch.candidates) {
       const version = versionForHash(candidate.contentHash);
-      const activeByReview = canImportActive(candidate, {
+      const reviewMetadata = reviewMetadataForCandidate(candidate, {
         owners: input.owners ?? [],
         approverRoles: input.approverRoles ?? []
+      });
+      const activeByReview = canImportActive(candidate, {
+        owners: reviewMetadata.owners,
+        approverRoles: reviewMetadata.approverRoles
       });
       const versionStatus = activeByReview.active ? "active" : "inactive";
       const skillUpdate: Prisma.SkillUpdateInput = {
@@ -211,8 +215,8 @@ export async function approveRegistryImportBatch(prisma: PrismaClient, input: Ap
           status: versionStatus,
           config: skillVersionConfig(candidate, {
             batchId: batch.id,
-            owners: input.owners ?? [],
-            approverRoles: input.approverRoles ?? [],
+            owners: reviewMetadata.owners,
+            approverRoles: reviewMetadata.approverRoles,
             activeByReview
           }) as Prisma.InputJsonValue,
           execution: skillVersionExecution(candidate) as Prisma.InputJsonValue
@@ -537,6 +541,22 @@ function serializeImportBatch(batch: {
   };
 }
 
+function reviewMetadataForCandidate(
+  candidate: {
+    metadata: unknown;
+  },
+  review: { owners: string[]; approverRoles: string[] }
+) {
+  const metadata = recordFrom(candidate.metadata);
+  const ownerDefaults = stringArray(metadata.owners);
+  const approverDefaults = stringArray(metadata.approver_roles);
+
+  return {
+    owners: review.owners.length > 0 ? review.owners : ownerDefaults,
+    approverRoles: review.approverRoles.length > 0 ? review.approverRoles : approverDefaults
+  };
+}
+
 function canImportActive(
   candidate: {
     defaultRiskLevel: string;
@@ -580,6 +600,7 @@ function skillVersionConfig(
     activeByReview: { active: boolean; reason: string };
   }
 ) {
+  const metadata = recordFrom(candidate.metadata);
   return {
     source: {
       type: candidate.sourceType,
@@ -597,6 +618,13 @@ function skillVersionConfig(
     output_schema: {},
     owners: input.owners,
     approver_roles: input.approverRoles,
+    environments: stringArray(metadata.environments),
+    required_evidence: stringArray(metadata.required_evidence),
+    classification_flags: recordFrom(metadata.classification_flags),
+    supporting_files: stringArray(metadata.supporting_files),
+    supporting_file_count: numberFrom(metadata.supporting_file_count),
+    supporting_file_bytes: numberFrom(metadata.supporting_file_bytes),
+    dynamic_shell_blocks: Array.isArray(metadata.dynamic_shell_blocks) ? metadata.dynamic_shell_blocks : [],
     tags: tagsForCandidate(candidate),
     import_batch_id: input.batchId,
     import_candidate_id: candidate.candidateId,
@@ -655,6 +683,10 @@ function stringArray(value: unknown): string[] {
 
 function stringFrom(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function numberFrom(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function recordFrom(value: unknown): Record<string, unknown> {
