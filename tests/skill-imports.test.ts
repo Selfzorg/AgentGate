@@ -664,6 +664,89 @@ describe("AgentGate skill import recovery scope", () => {
       }
     });
   });
+
+  it("resolves natural-language Claude requests to matching imported Claude commands", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createDestroyEnvironmentCommand(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["infra_owner"],
+            approver_roles: ["infra_owner"]
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const decision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            source: "claude_code",
+            adapter_type: "hook",
+            agent: {
+              agent_id: "agent_code_001",
+              agent_type: "claude_code",
+              role: "release_agent"
+            },
+            tool: {
+              tool_name: "Bash"
+            },
+            raw_action: "trigger destroy cloud environment resources",
+            context: {
+              repo: "agentgate",
+              environment: "production"
+            }
+          }
+        });
+
+        expect(decision.statusCode).toBe(200);
+        const body = decision.json();
+        expect(body.skill_id).toBe("claude_command:repo:claude-commands-infrastructure-destroy-environment");
+        expect(body.decision).toBe("REQUIRE_APPROVAL");
+        expect(body.risk_level).toBe("critical");
+        expect(body.missing_checks).toEqual(expect.arrayContaining(["backup_exists", "management_approval_token"]));
+
+        const run = await prisma.skillRun.findUniqueOrThrow({
+          where: { id: body.run_id },
+          include: {
+            gateCheckResults: true,
+            evidenceTasks: true
+          }
+        });
+        expect(run.resolvedSkillSnapshot).toMatchObject({
+          resolver_source: "imported_registry",
+          matched_field: "name",
+          source_fingerprint: {
+            source_type: "claude_command",
+            path: ".claude/commands/infrastructure/destroy-environment.md"
+          }
+        });
+        expect(run.gateCheckResults.map((check) => check.checkKey).sort()).toEqual(["backup_exists", "management_approval_token"]);
+        expect(run.evidenceTasks.map((task) => task.checkKey).sort()).toEqual(["backup_exists", "management_approval_token"]);
+      } finally {
+        await app.close();
+      }
+    });
+  });
 });
 
 async function withTempWorkspace(test: (workspace: string) => Promise<void>) {
@@ -780,6 +863,31 @@ async function createEcommerceProdDeploymentCommand(workspace: string) {
       "```bash",
       "echo \"This prod-deployment got executed\" >> ecommerce_operations.log",
       "```"
+    ].join("\n"),
+    "utf8"
+  );
+}
+
+async function createDestroyEnvironmentCommand(workspace: string) {
+  const commandDir = join(workspace, ".claude", "commands", "infrastructure");
+  await mkdir(commandDir, { recursive: true });
+  await writeFile(
+    join(commandDir, "destroy-environment.md"),
+    [
+      "---",
+      "name: destroy-environment",
+      "description: Tear down completely and destroy cloud environment resources using Terraform.",
+      "allowed-tools:",
+      "  - Bash(terraform destroy:*)",
+      "  - Bash(echo:*)",
+      "owners: infra-team",
+      "approver_roles: infra-owner",
+      "required_evidence:",
+      "  - management-approval-token",
+      "  - backup-exists",
+      "---",
+      "",
+      "Destroy cloud environment resources after AgentGate approval."
     ].join("\n"),
     "utf8"
   );

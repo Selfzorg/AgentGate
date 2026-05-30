@@ -270,7 +270,7 @@ function isContextualAgentSkillBridgeAllowed(match: RegistryResolutionMatch, con
 
 function isExplicitAgentSkillMatch(match: RegistryResolutionMatch) {
   if (match.matchedField === "skill_id" || match.matchedField === "path") return true;
-  return match.matchedField === "name" && match.confidence >= 0.9;
+  return match.matchedField === "name" && match.confidence >= 0.85;
 }
 
 function isClaudeSourceType(sourceType: string) {
