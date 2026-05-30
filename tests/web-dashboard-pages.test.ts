@@ -86,6 +86,8 @@ describe("web dashboard page regressions", () => {
 
   it("keeps next-step guidance visible across import, approval, simulation, and execution flows", async () => {
     const skillsRegistry = await readProjectFile("apps/web-dashboard/components/skills/SkillsRegistry.tsx");
+    const skillCandidateDetail = await readProjectFile("apps/web-dashboard/components/skills/SkillCandidateDetail.tsx");
+    const importReviewHelpers = await readProjectFile("apps/web-dashboard/components/skills/import-review-helpers.ts");
     const skillRegistryUi = await readProjectFile("apps/web-dashboard/components/skills/skill-registry-ui.tsx");
     const approvalCard = await readProjectFile("apps/web-dashboard/components/approvals/ApprovalCard.tsx");
     const riskScanner = await readProjectFile("apps/web-dashboard/components/risk-scanner/RiskScannerPanel.tsx");
@@ -94,6 +96,11 @@ describe("web dashboard page regressions", () => {
 
     expect(skillsRegistry).toContain("Create Review Snapshot");
     expect(skillsRegistry).toContain("Approve Selected");
+    expect(skillsRegistry).toContain("evidenceCheckOptionsFromSkills");
+    expect(skillCandidateDetail).toContain("Evidence Options");
+    expect(skillCandidateDetail).toContain("Custom checks without a registered evidence skill");
+    expect(importReviewHelpers).toContain("backup_exists");
+    expect(importReviewHelpers).toContain("evidenceCheckOptionsFromSkills");
     expect(skillRegistryUi).toContain("Next: create a review snapshot");
     expect(skillRegistryUi).toContain("Next: trigger or simulate the imported skill");
 

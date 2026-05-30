@@ -5,6 +5,13 @@ export type CandidateReviewDraft = {
   policyAliases: string;
 };
 
+export type EvidenceCheckOption = {
+  key: string;
+  label: string;
+  description: string;
+  source: "registered" | "built_in" | "custom";
+};
+
 const evidenceAliases: Record<string, string> = {
   "automated-testing-report": "tests_passed",
   "automated-testing": "tests_passed",
@@ -21,18 +28,60 @@ const evidenceAliases: Record<string, string> = {
   security: "security_scan_passed"
 };
 
-const knownEvidenceChecks = new Set([
-  "ci_passed",
-  "tests_passed",
-  "rollback_plan_exists",
-  "staging_deploy_successful",
-  "required_reviews_passed",
-  "branch_protection_satisfied",
-  "dry_run_completed",
-  "schema_diff_generated",
-  "backup_exists",
-  "security_scan_passed"
-]);
+export const builtInEvidenceCheckOptions: EvidenceCheckOption[] = [
+  {
+    key: "ci_passed",
+    label: "CI Passed",
+    description: "Verifies the latest CI status for the target repo/commit."
+  },
+  {
+    key: "tests_passed",
+    label: "Tests Passed",
+    description: "Verifies test evidence for the proposed change."
+  },
+  {
+    key: "rollback_plan_exists",
+    label: "Rollback Plan",
+    description: "Confirms a rollback plan is present before risky changes."
+  },
+  {
+    key: "staging_deploy_successful",
+    label: "Staging Deploy",
+    description: "Confirms the change succeeded in staging first."
+  },
+  {
+    key: "required_reviews_passed",
+    label: "Required Reviews",
+    description: "Checks required code or owner reviews."
+  },
+  {
+    key: "branch_protection_satisfied",
+    label: "Branch Protection",
+    description: "Checks branch protection and merge rules."
+  },
+  {
+    key: "dry_run_completed",
+    label: "Dry Run",
+    description: "Confirms a dry-run completed before mutation."
+  },
+  {
+    key: "schema_diff_generated",
+    label: "Schema Diff",
+    description: "Confirms a schema diff was generated for DB changes."
+  },
+  {
+    key: "backup_exists",
+    label: "Backup Exists",
+    description: "Confirms a backup artifact exists before destructive actions."
+  },
+  {
+    key: "security_scan_passed",
+    label: "Security Scan",
+    description: "Verifies security scan evidence for the action."
+  }
+].map((option) => ({ ...option, source: "built_in" }));
+
+export const knownEvidenceChecks = new Set(builtInEvidenceCheckOptions.map((option) => option.key));
 
 export function reviewDraftsForCandidates(candidates: SkillImportCandidate[]) {
   return Object.fromEntries(candidates.map((candidate) => [candidate.candidate_id, defaultReviewDraft(candidate)]));
@@ -111,6 +160,25 @@ export function evidenceWarningsForChecks(checks: string[], rawEvidence: string[
   );
 }
 
+export function evidenceCheckOptionsFromSkills(skills: SkillRecord[]): EvidenceCheckOption[] {
+  const registered = skills.flatMap((skill) => {
+    const checkKey = checkKeyFromSkill(skill);
+    if (!checkKey) return [];
+    return [
+      {
+        key: checkKey,
+        label: skill.name,
+        description: skill.description ?? `Registered evidence skill ${skill.skill_id}.`,
+        source: "registered" as const
+      }
+    ];
+  });
+  const byKey = new Map<string, EvidenceCheckOption>();
+  for (const option of builtInEvidenceCheckOptions) byKey.set(option.key, option);
+  for (const option of registered) byKey.set(option.key, option);
+  return [...byKey.values()].sort((left, right) => left.key.localeCompare(right.key));
+}
+
 export function warningCountForCandidate(candidate: SkillImportCandidate) {
   return candidate.warnings.length + (candidate.evidence_warnings?.length ?? 0);
 }
@@ -130,6 +198,14 @@ function normalizeEvidenceCheckKey(value: string) {
   const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   if (!slug) return null;
   return evidenceAliases[slug] ?? slug.replaceAll("-", "_");
+}
+
+function checkKeyFromSkill(skill: SkillRecord) {
+  const configCheck = stringFrom(skill.config.check_key);
+  const executionCheck = stringFrom(skill.execution.check_key);
+  if (configCheck) return configCheck;
+  if (executionCheck) return executionCheck;
+  return skill.category === "evidence" ? stringFrom(skill.config.required_check) : null;
 }
 
 function categoryForCandidate(candidate: {
@@ -153,6 +229,10 @@ function categoryForCandidate(candidate: {
 function stringArray(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim());
+}
+
+function stringFrom(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function recordFrom(value: unknown): Record<string, unknown> {

@@ -18,6 +18,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { SkillCandidateDetail } from "./SkillCandidateDetail";
 import {
   defaultReviewDraft,
+  evidenceCheckOptionsFromSkills,
   evidenceWarningsForChecks,
   inferPolicyAliasesForCandidate,
   inferredRequiredChecksForCandidate,
@@ -100,6 +101,7 @@ export function SkillsRegistry() {
 
   const activeCandidate = candidates.find((candidate) => candidate.candidate_id === activeCandidateId) ?? filteredCandidates[0] ?? null;
   const sourceOptions = [...new Set(candidates.map((candidate) => candidate.source_type))].sort();
+  const evidenceOptions = useMemo(() => evidenceCheckOptionsFromSkills(skills), [skills]);
   const selectedCount = selectedCandidateIds.length;
   const importStage = batch
     ? batch.status === "approved"
@@ -384,6 +386,7 @@ export function SkillsRegistry() {
               candidate={activeCandidate}
               review={activeCandidate ? candidateReviews[activeCandidate.candidate_id] ?? defaultReviewDraft(activeCandidate) : null}
               editable={Boolean(batch && activeCandidate?.review_status === "pending")}
+              evidenceOptions={evidenceOptions}
               onReviewChange={(candidateId, review) =>
                 setCandidateReviews((current) => ({
                   ...current,
