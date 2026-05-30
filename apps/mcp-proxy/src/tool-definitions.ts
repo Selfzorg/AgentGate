@@ -8,6 +8,7 @@ export const AGENTGATE_TOOL_NAMES = [
   "agentgate_drop_table",
   "agentgate_deploy_staging",
   "agentgate_deploy_production",
+  "agentgate_govern_action",
   "agentgate_replay_demo_action",
   "agentgate_get_run",
   "agentgate_get_audit_trace",
@@ -99,6 +100,24 @@ export const AGENTGATE_TOOL_DEFINITIONS: AgentGateToolDefinition[] = [
       service: z.string().default("checkout-api"),
       requested_skill: z.string().optional(),
       user_intent: z.string().optional()
+    }
+  },
+  {
+    name: "agentgate_govern_action",
+    description:
+      "Ask AgentGate to govern an arbitrary risky or imported local skill action without executing it. Use this when the user asks for a governed/destructive/imported Claude or Codex skill and no more specific AgentGate MCP tool exists.",
+    inputSchema: {
+      raw_action: z.string(),
+      service: z.string().optional(),
+      environment: z.enum(["dev", "staging", "production"]).default("production"),
+      repo: z.string().optional(),
+      branch: z.string().optional(),
+      requested_skill: z.string().optional(),
+      requested_skill_id: z.string().optional(),
+      requested_skill_name: z.string().optional(),
+      user_intent: z.string().optional(),
+      agent_role: z.enum(["code_agent", "release_agent", "db_agent"]).optional(),
+      context: z.record(z.unknown()).optional()
     }
   },
   {

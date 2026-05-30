@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +8,7 @@ import { scanAgentSkills } from "@agentgate/skill-registry";
 import { PrismaClient } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../apps/api-server/src/app";
+import { callAgentGateTool } from "../apps/mcp-proxy/src/index";
 
 const execFileAsync = promisify(execFile);
 const prisma = new PrismaClient();
@@ -671,6 +673,9 @@ describe("AgentGate skill import recovery scope", () => {
       const tenantId = createdTenantIds.at(-1)!;
       const workspaceId = workspaceIdForTenant(tenantId);
       const app = await createApp({ prisma, logger: false });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address() as AddressInfo;
+      const baseUrl = `http://127.0.0.1:${address.port}`;
 
       try {
         const importResponse = await app.inject({
@@ -742,6 +747,25 @@ describe("AgentGate skill import recovery scope", () => {
         });
         expect(run.gateCheckResults.map((check) => check.checkKey).sort()).toEqual(["backup_exists", "management_approval_token"]);
         expect(run.evidenceTasks.map((task) => task.checkKey).sort()).toEqual(["backup_exists", "management_approval_token"]);
+
+        const mcpResult = await callAgentGateTool(
+          "agentgate_govern_action",
+          {
+            raw_action: "trigger destroy cloud environment resources",
+            environment: "production"
+          },
+          {
+            apiBaseUrl: baseUrl,
+            tenantId,
+            workspaceId,
+            timeoutMs: 5000
+          }
+        );
+        const mcpPayload = JSON.parse(mcpResult.content[0]?.text ?? "{}");
+        expect(mcpResult.isError).toBe(true);
+        expect(mcpPayload.agentgate.skill_id).toBe("claude_command:repo:claude-commands-infrastructure-destroy-environment");
+        expect(mcpPayload.agentgate.decision).toBe("REQUIRE_APPROVAL");
+        expect(mcpPayload.agentgate.missing_checks).toEqual(expect.arrayContaining(["backup_exists", "management_approval_token"]));
       } finally {
         await app.close();
       }

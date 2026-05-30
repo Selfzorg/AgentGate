@@ -146,6 +146,24 @@ export async function callAgentGateTool(
           )
         );
 
+      case "agentgate_govern_action": {
+        const rawAction = requiredString(args.raw_action, "raw_action");
+        return decisionResult(
+          await invokeMcpTool(
+            {
+              toolName: rawAction,
+              arguments: {
+                ...args,
+                raw_action: rawAction
+              },
+              context: genericActionContext(args, rawAction),
+              agent: agentFor(genericAgentRole(args, rawAction))
+            },
+            config
+          )
+        );
+      }
+
       case "agentgate_replay_demo_action": {
         const replay = await replayDemoAction(stringArg(args.action_id, "safe_tests"), config);
         return decisionResult(replay.decision, { action_id: replay.action_id });
@@ -340,6 +358,29 @@ function agentFor(role: "code_agent" | "release_agent" | "db_agent"): AgentGateA
     agent_type: "coding_agent",
     role
   };
+}
+
+function genericActionContext(args: Record<string, unknown>, rawAction: string) {
+  return compactObject({
+    ...recordArg(args.context),
+    ...baseContext(args, environmentArg(args.environment, "production")),
+    service: optionalString(args.service),
+    requested_skill: optionalString(args.requested_skill),
+    requested_skill_id: optionalString(args.requested_skill_id),
+    requested_skill_name: optionalString(args.requested_skill_name),
+    original_user_prompt: optionalString(args.original_user_prompt) ?? rawAction,
+    user_intent: optionalString(args.user_intent) ?? rawAction
+  });
+}
+
+function genericAgentRole(args: Record<string, unknown>, rawAction: string): "code_agent" | "release_agent" | "db_agent" {
+  const requestedRole = args.agent_role;
+  if (requestedRole === "code_agent" || requestedRole === "release_agent" || requestedRole === "db_agent") return requestedRole;
+
+  const normalized = rawAction.toLowerCase();
+  if (/\b(database|db|sql|migration|migrate|drop table|truncate)\b/.test(normalized)) return "db_agent";
+  if (/\b(production|prod|deploy|destroy|terraform|cloud|merge)\b/.test(normalized)) return "release_agent";
+  return "code_agent";
 }
 
 function requiredString(value: unknown, name: string): string {

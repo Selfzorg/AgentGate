@@ -29,7 +29,7 @@ The hook supports these local tool shapes:
 - `Edit` and `Write` file mutation tools.
 - `mcp__server__tool` and `mcp.server.tool` MCP tool names.
 
-AgentGate-owned MCP calls such as `mcp__agentgate__agentgate_deploy_production` are allowed through to the AgentGate MCP proxy, where the proxy performs governance and returns the structured tool result.
+AgentGate-owned MCP calls such as `mcp__agentgate__agentgate_deploy_production` are allowed through to the AgentGate MCP proxy, where the proxy performs governance and returns the structured tool result. For imported skills or risky natural-language actions that do not have a dedicated tool, use `mcp__agentgate__agentgate_govern_action` with the exact user request in `raw_action`.
 
 ## Hook Environment
 

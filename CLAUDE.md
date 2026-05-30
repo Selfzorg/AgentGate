@@ -21,8 +21,11 @@ Use these AgentGate MCP tools as the normal path:
 - `agentgate_drop_table` for destructive table operations
 - `agentgate_deploy_staging` for staging deploys
 - `agentgate_deploy_production` for production deploys
+- `agentgate_govern_action` for imported Claude/Codex skills or risky/destructive requests that do not have a specific AgentGate tool
 - `agentgate_replay_demo_action` for PRD demo fixture replays
 - `agentgate_get_run` and `agentgate_get_audit_trace` to inspect governance results
+
+When the user names a governed/imported action such as "trigger destroy cloud environment resources" and no specific demo tool fits, call `agentgate_govern_action` with the exact user request in `raw_action`. Do not ask the user to translate their request into a hardcoded AgentGate tool first.
 
 ## Decision Handling
 

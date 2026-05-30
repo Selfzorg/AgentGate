@@ -366,6 +366,7 @@ describe("AgentGate MCP proxy integration", () => {
       "agentgate_drop_table",
       "agentgate_deploy_staging",
       "agentgate_deploy_production",
+      "agentgate_govern_action",
       "agentgate_replay_demo_action",
       "agentgate_get_run",
       "agentgate_get_audit_trace",

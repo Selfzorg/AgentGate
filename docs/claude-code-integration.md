@@ -75,6 +75,7 @@ Deploy production with vercel deploy --prod
 Run npm run migrate:prod against prod-main
 As a research agent, deploy production
 Call mcp__github__merge_pr targeting main
+Trigger destroy cloud environment resources
 ```
 
 Expected decisions:
@@ -84,6 +85,7 @@ Expected decisions:
 - `vercel deploy --prod` maps to `REQUIRE_APPROVAL`.
 - research-agent production deploy maps to `DENY`.
 - `mcp__github__merge_pr` normalizes to `mcp.github.merge_pr` and is governed by merge policy.
+- Imported or natural-language risky actions should call `mcp__agentgate__agentgate_govern_action` with `raw_action` set to the user's request, letting the registry resolve commands such as `destroy-environment`.
 
 For approval-required results, AgentGate does not expect Claude to guess readiness context. The API resolves policy-required checks to read-only evidence skills and queues `evidence_tasks`. Claude Code can then claim those tasks through the AgentGate MCP proxy, execute read-only evidence checks, and submit results. Critical actions still wait for human approval after evidence is ready when risk requires it.
 

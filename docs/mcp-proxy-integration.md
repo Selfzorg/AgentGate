@@ -72,6 +72,7 @@ AGENTGATE_API_BASE_URL = "http://localhost:4000"
 - `agentgate_drop_table`
 - `agentgate_deploy_staging`
 - `agentgate_deploy_production`
+- `agentgate_govern_action`
 - `agentgate_replay_demo_action`
 - `agentgate_get_run`
 - `agentgate_get_audit_trace`
@@ -83,6 +84,8 @@ AGENTGATE_API_BASE_URL = "http://localhost:4000"
 - `agentgate_fail_evidence_task`
 
 ## Evidence Task Workflow
+
+Use `agentgate_govern_action` as the catch-all for imported Claude/Codex skills or risky natural-language requests that do not map to a dedicated demo tool. For example, `trigger destroy cloud environment resources` should be sent as `raw_action` so AgentGate can resolve the imported `destroy-environment` Claude command from the registry and create the normal evidence/approval workflow.
 
 Approval-required decisions create asynchronous evidence tasks instead of asking the MCP caller to guess readiness context. A Claude Code or Codex MCP client can act as the evidence worker:
 
@@ -147,6 +150,7 @@ Expected behavior:
 - `agentgate_run_tests` returns `ALLOW` success.
 - `agentgate_drop_table` returns `DENY` with `isError: true`.
 - `agentgate_deploy_production` returns `REQUIRE_APPROVAL` with run and trace IDs.
+- `agentgate_govern_action` resolves imported skills from the registry when the raw user request names them.
 - `agentgate_execute_approved_run` succeeds only after the approval packet is approved.
 - `agentgate_apply_migration` returns `FORCE_DRY_RUN` until dry-run evidence is provided.
 
