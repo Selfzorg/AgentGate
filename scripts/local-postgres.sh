@@ -52,7 +52,11 @@ case "${COMMAND}" in
   start)
     require_bin pg_ctl
     mkdir -p "$(dirname "${DATA_DIR}")"
-    pg_ctl -D "${DATA_DIR}" -l "${LOG_FILE}" -o "-p ${PORT}" start
+    if pg_ctl -D "${DATA_DIR}" status >/dev/null 2>&1; then
+      echo "Postgres already running on localhost:${PORT}/${DB_NAME}"
+    else
+      pg_ctl -D "${DATA_DIR}" -l "${LOG_FILE}" -o "-p ${PORT}" start
+    fi
     ;;
   stop)
     require_bin pg_ctl

@@ -1,5 +1,7 @@
 # Demo Script
 
+For a fresh-clone judge path, use the root [DEMO.md](../DEMO.md). This script is the presenter checklist once the app is already running.
+
 1. Run `pnpm demo:setup`, then `pnpm dev`.
 2. Optional reset between takes: `pnpm demo:reset`.
 3. Open `/live` and point to the three journey modes: without AgentGate, observe mode, and enforce mode.

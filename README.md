@@ -2,7 +2,27 @@
 
 AgentGate is the runtime governance layer for AI agent skills. The MVP now covers imported Claude/Codex/MCP skill discovery, review snapshots, evidence-backed approvals, policy simulation, scoped execution tokens, Claude handoff completion, the DB-backed runner loop, SSE execution logs, and audit trace integrity.
 
-## Quickstart
+## Judge Demo Quickstart
+
+For the shortest local demo from a fresh clone:
+
+```sh
+corepack enable
+corepack prepare pnpm@11.3.0 --activate
+pnpm install
+pnpm demo:bootstrap
+pnpm demo:local
+```
+
+Then open `http://localhost:3001`. In a second terminal, start Claude Code with the AgentGate project hook, MCP proxy, and project instructions:
+
+```sh
+pnpm claude:agentgate
+```
+
+See [DEMO.md](./DEMO.md) for the judge script, expected prompts, fallbacks, and troubleshooting.
+
+## Developer Quickstart
 
 ```sh
 corepack enable
