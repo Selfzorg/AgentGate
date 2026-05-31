@@ -1,3 +1,4 @@
+import type { EvidenceTaskSpec } from "@agentgate/core-types";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { createId } from "./id";
 
@@ -7,6 +8,7 @@ export type GateCheckInput = {
   skillRunId: string;
   skillId: string;
   requiredChecks: string[];
+  evidenceTasks?: EvidenceTaskSpec[] | undefined;
   context: Record<string, unknown>;
 };
 
@@ -47,6 +49,7 @@ export async function createGateCheckResults(
   const results = previewGateChecks({
     skillId: input.skillId,
     requiredChecks: input.requiredChecks,
+    evidenceTasks: input.evidenceTasks,
     context: input.context,
     mode: input.mode ?? "context"
   }).map((check) => ({
@@ -70,22 +73,26 @@ export async function createGateCheckResults(
 export function previewGateChecks({
   skillId,
   requiredChecks,
+  evidenceTasks = [],
   context,
   mode = "context"
 }: {
   skillId: string;
   requiredChecks: string[];
+  evidenceTasks?: EvidenceTaskSpec[] | undefined;
   context: Record<string, unknown>;
   mode?: GateCheckCreationMode;
 }): GateCheckPreview[] {
+  const taskByCheck = new Map(evidenceTasks.map((task) => [task.check_key, task]));
   return requiredChecks.map((checkKey) => {
     const status = mode === "pending" ? "pending" : statusForCheck(checkKey, context);
+    const evidenceTask = taskByCheck.get(checkKey);
 
     return {
       check_key: checkKey,
-      label: labels[checkKey] ?? checkKey,
+      label: evidenceTask?.label ?? labels[checkKey] ?? checkKey,
       status,
-      evidence: evidenceForCheck(checkKey, status, context, skillId)
+      evidence: evidenceForCheck(checkKey, status, context, skillId, evidenceTask)
     };
   });
 }
@@ -139,7 +146,8 @@ function evidenceForCheck(
   checkKey: string,
   status: GateCheckStatus,
   context: Record<string, unknown>,
-  skillId: string
+  skillId: string,
+  evidenceTask?: EvidenceTaskSpec | undefined
 ) {
   if (status === "pending" || status === "running") {
     return {
@@ -147,7 +155,8 @@ function evidenceForCheck(
       skill_id: skillId,
       context_key: checkKey,
       status,
-      reason: "Evidence collection has been queued."
+      reason: "Evidence collection has been queued.",
+      ...(evidenceTask ? { evidence_task: evidenceTask } : {})
     };
   }
 
@@ -156,6 +165,7 @@ function evidenceForCheck(
     skill_id: skillId,
     context_key: checkKey,
     status,
-    observed_context: context
+    observed_context: context,
+    ...(evidenceTask ? { evidence_task: evidenceTask } : {})
   };
 }

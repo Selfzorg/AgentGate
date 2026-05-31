@@ -9,6 +9,8 @@ import {
   rejectSkillImportBatch,
   scanSkillRegistry,
   setSkillVersionStatus,
+  updateSkillEvidenceTasks,
+  type EvidenceTaskSpec,
   type SkillImportBatch,
   type SkillRecord,
   type SkillRegistryScan
@@ -19,6 +21,8 @@ import { SkillCandidateDetail } from "./SkillCandidateDetail";
 import {
   defaultReviewDraft,
   evidenceCheckOptionsFromSkills,
+  evidenceSkillOptionsFromSkills,
+  evidenceTasksFromSkill,
   evidenceWarningsForChecks,
   inferPolicyAliasesForCandidate,
   inferredRequiredChecksForCandidate,
@@ -26,7 +30,8 @@ import {
   reviewDraftsForCandidates,
   sourceTypeFromSkill,
   warningCountForCandidate,
-  type CandidateReviewDraft
+  type CandidateReviewDraft,
+  type EvidenceSkillOption
 } from "./import-review-helpers";
 import { ImportNextStep, ImportStepRail, Metric, SourcePill, splitCsv } from "./skill-registry-ui";
 
@@ -47,6 +52,8 @@ export function SkillsRegistry() {
   const [candidateReviews, setCandidateReviews] = useState<Record<string, CandidateReviewDraft>>({});
   const [status, setStatus] = useState("Loading skill registry...");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
+  const [skillEvidenceDrafts, setSkillEvidenceDrafts] = useState<Record<string, EvidenceTaskSpec[]>>({});
 
   useEffect(() => {
     void loadSkills();
@@ -74,6 +81,7 @@ export function SkillsRegistry() {
         preferred_runtimes: candidate.preferredRuntimes,
         warnings: candidate.warnings,
         metadata: candidate.metadata,
+        evidence_tasks: Array.isArray(candidate.metadata.evidence_tasks) ? (candidate.metadata.evidence_tasks as EvidenceTaskSpec[]) : [],
         inferred_policy_aliases: inferPolicyAliasesForCandidate(candidate),
         inferred_required_checks: inferredRequiredChecksForCandidate(candidate),
         required_evidence_raw: rawRequiredEvidenceForCandidate(candidate),
@@ -102,6 +110,7 @@ export function SkillsRegistry() {
   const activeCandidate = candidates.find((candidate) => candidate.candidate_id === activeCandidateId) ?? filteredCandidates[0] ?? null;
   const sourceOptions = [...new Set(candidates.map((candidate) => candidate.source_type))].sort();
   const evidenceOptions = useMemo(() => evidenceCheckOptionsFromSkills(skills), [skills]);
+  const evidenceSkillOptions = useMemo(() => evidenceSkillOptionsFromSkills(skills), [skills]);
   const selectedCount = selectedCandidateIds.length;
   const importStage = batch
     ? batch.status === "approved"
@@ -175,7 +184,8 @@ export function SkillsRegistry() {
         candidateReviews: selectedCandidateIds.map((candidateId) => ({
           candidateId,
           requiredChecks: splitCsv(candidateReviews[candidateId]?.requiredChecks ?? ""),
-          policyAliases: splitCsv(candidateReviews[candidateId]?.policyAliases ?? "")
+          policyAliases: splitCsv(candidateReviews[candidateId]?.policyAliases ?? ""),
+          evidenceTasks: candidateReviews[candidateId]?.evidenceTasks ?? []
         })),
         owners: splitCsv(owners),
         approverRoles: splitCsv(approverRoles),
@@ -222,6 +232,92 @@ export function SkillsRegistry() {
     }
   }
 
+  function startSkillEvidenceEdit(skill: SkillRecord) {
+    setEditingSkillId(skill.id);
+    setSkillEvidenceDrafts((drafts) => ({
+      ...drafts,
+      [skill.id]: evidenceTasksFromSkill(skill)
+    }));
+  }
+
+  function updateSkillEvidenceDraft(skillId: string, index: number, field: keyof EvidenceTaskSpec, value: string) {
+    setSkillEvidenceDrafts((drafts) => ({
+      ...drafts,
+      [skillId]: (drafts[skillId] ?? []).map((task, taskIndex) => {
+        if (taskIndex !== index) return task;
+        if (field === "success_criteria" || field === "allowed_actions" || field === "target_files") {
+          return { ...task, [field]: splitCsv(value) };
+        }
+        return { ...task, [field]: value };
+      })
+    }));
+  }
+
+  function attachSkillEvidenceDraft(skillId: string, index: number, evidenceSkillId: string) {
+    const trimmedSkillId = evidenceSkillId.trim();
+    const option = evidenceSkillOptions.find((candidate) => candidate.skill_id === trimmedSkillId);
+    setSkillEvidenceDrafts((drafts) => ({
+      ...drafts,
+      [skillId]: (drafts[skillId] ?? []).map((task, taskIndex) => {
+        if (taskIndex !== index) return task;
+        if (!trimmedSkillId) {
+          const { evidence_skill_id: _evidenceSkillId, ...inlineTask } = task;
+          return inlineTask;
+        }
+        if (!option) return { ...task, evidence_skill_id: trimmedSkillId };
+        return {
+          ...task,
+          evidence_skill_id: option.skill_id,
+          check_key: option.check_key,
+          label: option.name,
+          instructions: ""
+        };
+      })
+    }));
+  }
+
+  function addSkillEvidenceDraft(skillId: string) {
+    setSkillEvidenceDrafts((drafts) => {
+      const current = drafts[skillId] ?? [];
+      const nextIndex = current.length + 1;
+      return {
+        ...drafts,
+        [skillId]: [
+          ...current,
+          {
+            check_key: `custom_evidence_${nextIndex}`,
+            label: `Custom evidence ${nextIndex}`,
+            instructions: "Describe the read-only evidence the worker must collect.",
+            success_criteria: [],
+            allowed_actions: ["read_file"],
+            target_files: []
+          }
+        ]
+      };
+    });
+  }
+
+  function removeSkillEvidenceDraft(skillId: string, index: number) {
+    setSkillEvidenceDrafts((drafts) => ({
+      ...drafts,
+      [skillId]: (drafts[skillId] ?? []).filter((_, taskIndex) => taskIndex !== index)
+    }));
+  }
+
+  async function saveSkillEvidenceTasks(skill: SkillRecord) {
+    setPendingAction(`evidence:${skill.id}`);
+    try {
+      await updateSkillEvidenceTasks(skill.skill_id, skillEvidenceDrafts[skill.id] ?? []);
+      setStatus(`Evidence tasks updated for ${skill.skill_id}. A new active skill version was created.`);
+      setEditingSkillId(null);
+      await loadSkills();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Evidence task update failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   function toggleCandidate(candidateId: string) {
     setSelectedCandidateIds((current) =>
       current.includes(candidateId) ? current.filter((id) => id !== candidateId) : [...current, candidateId]
@@ -239,6 +335,7 @@ export function SkillsRegistry() {
           <label className="min-w-[260px] flex-1">
             <span className="text-xs font-semibold uppercase text-muted">Skill Root</span>
             <input
+              suppressHydrationWarning
               value={rootDir}
               onChange={(event) => setRootDir(event.target.value)}
               placeholder="Current repository root"
@@ -247,6 +344,7 @@ export function SkillsRegistry() {
           </label>
           <label className="flex h-10 items-center gap-2 rounded-ui border border-border bg-background px-3 text-sm">
             <input
+              suppressHydrationWarning
               type="checkbox"
               checked={includeUserScopes}
               onChange={(event) => setIncludeUserScopes(event.target.checked)}
@@ -312,7 +410,7 @@ export function SkillsRegistry() {
                 </select>
               </label>
               <label className="flex h-9 items-center gap-2 rounded-ui border border-border bg-background px-3 text-sm">
-                <input type="checkbox" checked={warningOnly} onChange={(event) => setWarningOnly(event.target.checked)} />
+                <input suppressHydrationWarning type="checkbox" checked={warningOnly} onChange={(event) => setWarningOnly(event.target.checked)} />
                 Warnings
               </label>
               <Button variant="secondary" disabled={!batch || pendingAction !== null} onClick={selectFiltered}>
@@ -345,6 +443,7 @@ export function SkillsRegistry() {
                     >
                       <td className="px-4 py-3">
                         <input
+                          suppressHydrationWarning
                           type="checkbox"
                           checked={selectedCandidateIds.includes(candidate.candidate_id)}
                           disabled={candidate.review_status !== "pending"}
@@ -387,6 +486,7 @@ export function SkillsRegistry() {
               review={activeCandidate ? candidateReviews[activeCandidate.candidate_id] ?? defaultReviewDraft(activeCandidate) : null}
               editable={Boolean(batch && activeCandidate?.review_status === "pending")}
               evidenceOptions={evidenceOptions}
+              evidenceSkillOptions={evidenceSkillOptions}
               onReviewChange={(candidateId, review) =>
                 setCandidateReviews((current) => ({
                   ...current,
@@ -401,6 +501,7 @@ export function SkillsRegistry() {
               <label>
                 <span className="text-xs font-semibold uppercase text-muted">Owners</span>
                 <input
+                  suppressHydrationWarning
                   value={owners}
                   onChange={(event) => setOwners(event.target.value)}
                   className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 text-sm outline-none focus:border-accent"
@@ -409,6 +510,7 @@ export function SkillsRegistry() {
               <label>
                 <span className="text-xs font-semibold uppercase text-muted">Approvers</span>
                 <input
+                  suppressHydrationWarning
                   value={approverRoles}
                   onChange={(event) => setApproverRoles(event.target.value)}
                   className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 text-sm outline-none focus:border-accent"
@@ -417,6 +519,7 @@ export function SkillsRegistry() {
               <label>
                 <span className="text-xs font-semibold uppercase text-muted">Comment</span>
                 <input
+                  suppressHydrationWarning
                   value={comment}
                   onChange={(event) => setComment(event.target.value)}
                   className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 text-sm outline-none focus:border-accent"
@@ -470,6 +573,112 @@ export function SkillsRegistry() {
                 )}
                 {skill.version_status === "active" ? "Disable" : "Enable"}
               </Button>
+              <div className="md:col-span-4">
+                <div className="rounded-ui border border-border bg-background p-3">
+                  <div className="grid gap-3 md:grid-cols-[1fr_1.4fr]">
+                    <div>
+                      <div className="text-xs font-semibold uppercase text-muted">What It Does</div>
+                      <p className="mt-1 text-sm leading-6 text-muted">{skillWhatItDoes(skill)}</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-semibold uppercase text-muted">Expected Evidence Tasks</div>
+                          <div className="mt-1 text-[11px] text-muted">Saved edits create a new active skill version.</div>
+                        </div>
+                        {editingSkillId === skill.id ? (
+                          <div className="flex items-center gap-2">
+                            <Button variant="secondary" disabled={pendingAction === `evidence:${skill.id}`} onClick={() => setEditingSkillId(null)}>
+                              Cancel
+                            </Button>
+                            <Button disabled={pendingAction === `evidence:${skill.id}`} onClick={() => void saveSkillEvidenceTasks(skill)}>
+                              {pendingAction === `evidence:${skill.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                              Save Evidence
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button variant="secondary" disabled={pendingAction !== null} onClick={() => startSkillEvidenceEdit(skill)}>
+                            Edit Evidence
+                          </Button>
+                        )}
+                      </div>
+                      <div className="mt-2 grid gap-2">
+                        {(editingSkillId === skill.id ? skillEvidenceDrafts[skill.id] ?? [] : evidenceTasksFromSkill(skill)).map((task, index) => (
+                          <div key={`${task.check_key}-${index}`} className="rounded-ui border border-border p-3">
+                            {editingSkillId === skill.id ? (
+                              <div className="grid gap-2">
+                                <div className="grid gap-2 md:grid-cols-2">
+                                  <EvidenceTaskField label="Check Key" value={task.check_key} onChange={(value) => updateSkillEvidenceDraft(skill.id, index, "check_key", value)} />
+                                  <EvidenceTaskField label="Label" value={task.label} onChange={(value) => updateSkillEvidenceDraft(skill.id, index, "label", value)} />
+                                </div>
+                                <EvidenceSkillInput
+                                  value={task.evidence_skill_id ?? ""}
+                                  listId={`skill-evidence-skill-${skill.id}-${index}`}
+                                  options={evidenceSkillOptions}
+                                  onChange={(value) => attachSkillEvidenceDraft(skill.id, index, value)}
+                                />
+                                <EvidenceTaskField
+                                  label="Instructions"
+                                  value={task.instructions}
+                                  onChange={(value) => updateSkillEvidenceDraft(skill.id, index, "instructions", value)}
+                                  multiline
+                                />
+                                <div className="grid gap-2 md:grid-cols-3">
+                                  <EvidenceTaskField
+                                    label="Success Criteria"
+                                    value={task.success_criteria.join(", ")}
+                                    onChange={(value) => updateSkillEvidenceDraft(skill.id, index, "success_criteria", value)}
+                                  />
+                                  <EvidenceTaskField
+                                    label="Allowed Actions"
+                                    value={task.allowed_actions.join(", ")}
+                                    placeholder="read_only, read_file, rg"
+                                    onChange={(value) => updateSkillEvidenceDraft(skill.id, index, "allowed_actions", value)}
+                                  />
+                                  <EvidenceTaskField
+                                    label="Target Files"
+                                    value={task.target_files.join(", ")}
+                                    onChange={(value) => updateSkillEvidenceDraft(skill.id, index, "target_files", value)}
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => removeSkillEvidenceDraft(skill.id, index)}
+                                  className="justify-self-start rounded-ui border border-border px-2 py-1 text-[11px] font-medium text-muted"
+                                >
+                                  Remove task
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="font-medium">{task.label}</div>
+                                  <div className="font-mono text-[11px] text-muted">{task.check_key}</div>
+                                </div>
+                                <p className="mt-1 text-xs leading-5 text-muted">{task.instructions}</p>
+                                <div className="mt-2 font-mono text-[11px] text-muted">
+                                  verifier: {task.evidence_skill_id ?? "inline"} - actions: {task.allowed_actions.join(", ") || "default"} - files: {task.target_files.join(", ") || "none"}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                        {editingSkillId === skill.id ? (
+                          <button
+                            type="button"
+                            onClick={() => addSkillEvidenceDraft(skill.id)}
+                            className="rounded-ui border border-dashed border-border p-2 text-sm font-medium text-muted"
+                          >
+                            Add evidence task
+                          </button>
+                        ) : evidenceTasksFromSkill(skill).length === 0 ? (
+                          <div className="rounded-ui border border-border p-2 text-sm text-muted">No structured evidence tasks.</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </article>
           ))}
           {skills.length === 0 ? <div className="p-5 text-sm text-muted">No skills loaded.</div> : null}
@@ -477,4 +686,74 @@ export function SkillsRegistry() {
       </section>
     </div>
   );
+}
+
+function skillWhatItDoes(skill: SkillRecord) {
+  const snapshot = recordFrom(skill.config.execution_snapshot);
+  const body = typeof snapshot.body === "string" ? snapshot.body.trim() : "";
+  if (body) return body.length > 260 ? `${body.slice(0, 260)}...` : body;
+  return skill.description ?? "No behavior summary available.";
+}
+
+function EvidenceTaskField({
+  label,
+  value,
+  multiline,
+  placeholder,
+  onChange
+}: {
+  label: string;
+  value: string;
+  multiline?: boolean;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  const className = "mt-1 w-full rounded-ui border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent";
+  return (
+    <label className="block">
+      <span className="text-[10px] font-semibold uppercase text-muted">{label}</span>
+      {multiline ? (
+        <textarea suppressHydrationWarning value={value} rows={3} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className={className} />
+      ) : (
+        <input suppressHydrationWarning value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className={className} />
+      )}
+    </label>
+  );
+}
+
+function EvidenceSkillInput({
+  value,
+  listId,
+  options,
+  onChange
+}: {
+  value: string;
+  listId: string;
+  options: EvidenceSkillOption[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[10px] font-semibold uppercase text-muted">evidence_skill_id</span>
+      <input
+        suppressHydrationWarning
+        value={value}
+        list={listId}
+        placeholder="verify-ci-status"
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 w-full rounded-ui border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
+      />
+      <datalist id={listId}>
+        {options.map((option) => (
+          <option key={option.skill_id} value={option.skill_id}>
+            {option.name} ({option.check_key})
+          </option>
+        ))}
+      </datalist>
+    </label>
+  );
+}
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }

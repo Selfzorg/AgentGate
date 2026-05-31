@@ -32,6 +32,9 @@ describe("web dashboard page regressions", () => {
     expect(approvalCard).toContain("getApprovals");
     expect(approvalCard).toContain("approveApproval");
     expect(approvalCard).toContain("denyApproval");
+    expect(approvalCard).toContain("runSkillRunDryRun");
+    expect(approvalCard).toContain("RelatedRunSearchResults");
+    expect(approvalCard).toContain("response.related_runs");
     expect(approvalCard).toContain("href={`/skill-runs/${approval.skill_run.id}`}");
     expect(approvalCard).not.toContain("Link href={`/skill-runs/${approval.skill_run.id}`}");
 
@@ -96,8 +99,16 @@ describe("web dashboard page regressions", () => {
 
     expect(skillsRegistry).toContain("Create Review Snapshot");
     expect(skillsRegistry).toContain("Approve Selected");
+    expect(skillsRegistry).toContain("Expected Evidence Tasks");
+    expect(skillsRegistry).toContain("updateSkillEvidenceTasks");
+    expect(skillsRegistry).toContain("What It Does");
     expect(skillsRegistry).toContain("evidenceCheckOptionsFromSkills");
+    expect(skillsRegistry).toContain("evidence_skill_id");
+    expect(skillsRegistry).toContain("verify-ci-status");
+    expect(skillsRegistry).toContain("evidenceSkillOptionsFromSkills");
     expect(skillCandidateDetail).toContain("Evidence Options");
+    expect(skillCandidateDetail).toContain("Expected Evidence Tasks");
+    expect(skillCandidateDetail).toContain("evidence_skill_id");
     expect(skillCandidateDetail).toContain("Custom checks without a registered evidence skill");
     expect(importReviewHelpers).toContain("backup_exists");
     expect(importReviewHelpers).toContain("evidenceCheckOptionsFromSkills");

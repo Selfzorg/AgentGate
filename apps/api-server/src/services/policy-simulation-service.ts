@@ -79,13 +79,18 @@ export async function simulatePolicyRisk({
     context: request.context
   });
   const importedRequiredChecks = Array.isArray(resolvedSkill.required_checks) ? resolvedSkill.required_checks : [];
-  const requiredChecks = mergeRequiredChecks(policy.required_checks, importedRequiredChecks);
+  const importedEvidenceTaskChecks = Array.isArray(resolvedSkill.evidence_tasks)
+    ? resolvedSkill.evidence_tasks.map((task) => task.check_key)
+    : [];
+  const skillRequiredChecks = mergeRequiredChecks(importedRequiredChecks, importedEvidenceTaskChecks);
+  const requiredChecks = mergeRequiredChecks(policy.required_checks, skillRequiredChecks);
   const mode = governanceModeFromContext(request.context);
   const effectiveDecision = mode === "enforce" ? policy.decision : "ALLOW";
 
   const gateChecks = previewGateChecks({
     skillId: resolvedSkill.skill_id,
     requiredChecks,
+    evidenceTasks: resolvedSkill.evidence_tasks ?? [],
     context: request.context
   });
   const missingChecks = gateChecks
@@ -151,7 +156,8 @@ export async function simulatePolicyRisk({
           decision: policy.matched_policy.decision,
           reason: policy.matched_policy.reason,
           policy_required_checks: policy.required_checks,
-          imported_required_checks: importedRequiredChecks,
+          imported_required_checks: skillRequiredChecks,
+          imported_evidence_tasks: resolvedSkill.evidence_tasks ?? [],
           required_checks: requiredChecks,
           approvers: policy.approvers
         }

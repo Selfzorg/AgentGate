@@ -1,4 +1,5 @@
 import type { GateCheckStatus } from "@prisma/client";
+import type { EvidenceTaskSpec } from "@agentgate/core-types";
 import {
   type EvidenceRuntimeId,
   type EvidenceSkillDefinition,
@@ -29,6 +30,7 @@ export type EvidenceRuntimeExecutionInput = {
   targetSkillId: string;
   requestedBy: string;
   evidenceSkill: EvidenceSkillDefinition;
+  evidenceTaskSpec?: EvidenceTaskSpec | undefined;
 };
 
 export type EvidenceRuntimeExecutionResult = {
@@ -255,8 +257,11 @@ async function executeReadOnlyEvidenceSkill(
 ): Promise<Omit<EvidenceRuntimeExecutionResult, "selectedRuntime" | "runtimeFallbacks">> {
   const subagent = subagentForCheck(input.checkKey);
   const directive = directiveForCheck(input.context, input.checkKey, input.attempt);
-  const status = directive.status;
-  const reason = directive.reason ?? defaultReason(input.label, status, subagent.role);
+  const customLocalSpec = runtime === "local_deterministic" && input.evidenceTaskSpec && !passByDefaultChecks.has(input.checkKey);
+  const status = customLocalSpec ? "missing" : directive.status;
+  const reason = customLocalSpec
+    ? `${input.label} requires a Codex or Claude evidence worker to run the structured evidence task.`
+    : directive.reason ?? defaultReason(input.label, status, subagent.role);
 
   return {
     status,
@@ -303,6 +308,7 @@ function baseEvidence(
       registry_source: input.evidenceSkill.registrySource
     },
     evidence_skill_id: input.evidenceSkill.skillId,
+    ...(input.evidenceTaskSpec ? { evidence_task: input.evidenceTaskSpec } : {}),
     target_skill_id: input.targetSkillId,
     raw_action: input.rawAction,
     observed_context: contextSummary(input.context),
@@ -353,6 +359,9 @@ function directiveForCheck(context: Record<string, unknown>, checkKey: string, a
 }
 
 function directiveFromObservedContext(context: Record<string, unknown>, checkKey: string): EvidenceDirective | null {
+  if (checkKey === "dry_run_completed" || checkKey === "schema_diff_generated" || checkKey === "backup_exists") {
+    return directiveFromDryRunResult(context, checkKey);
+  }
   if (checkKey === "ci_passed") return triStateDirective(context.ci_status, "passed", "CI status passed.", "CI status did not pass.");
   if (checkKey === "tests_passed") return triStateDirective(context.tests_status, "passed", "Tests passed.", "Tests did not pass.");
   if (checkKey === "security_scan_passed") {
@@ -364,15 +373,6 @@ function directiveFromObservedContext(context: Record<string, unknown>, checkKey
   }
   if (checkKey === "staging_deploy_successful") {
     return triStateDirective(context.staging_deploy, "success", "Staging deploy succeeded.", "Staging deploy has not succeeded.");
-  }
-  if (checkKey === "dry_run_completed") {
-    return booleanDirective(context.dry_run_completed, "Dry-run completion was verified.", "Dry-run completion evidence is missing.");
-  }
-  if (checkKey === "schema_diff_generated") {
-    return booleanDirective(context.schema_diff_generated, "Schema diff artifact was verified.", "Schema diff artifact is missing.");
-  }
-  if (checkKey === "backup_exists") {
-    return booleanDirective(context.backup_exists, "Backup artifact was verified.", "Backup artifact is missing.");
   }
   if (checkKey === "required_reviews_passed") {
     return booleanDirective(context.required_reviews_passed, "Required reviews passed.", "Required reviews have not passed.");
@@ -386,6 +386,41 @@ function directiveFromObservedContext(context: Record<string, unknown>, checkKey
   }
 
   return null;
+}
+
+function directiveFromDryRunResult(context: Record<string, unknown>, checkKey: string): EvidenceDirective {
+  const dryRunResult = recordFrom(context.dry_run_result);
+  const resultPayload = recordFrom(dryRunResult.result);
+  const artifacts = [...recordArray(dryRunResult.artifacts), ...recordArray(context.dry_run_artifacts)];
+  const status = typeof dryRunResult.status === "string" ? dryRunResult.status : "";
+
+  if (checkKey === "dry_run_completed") {
+    if (status === "completed") return { status: "passed", reason: "Dry-run result completed successfully." };
+    if (status === "failed") return { status: "failed", reason: "Dry-run result failed." };
+    return { status: "missing", reason: "Dry-run result is missing or incomplete." };
+  }
+
+  if (checkKey === "schema_diff_generated") {
+    if (resultPayload.schema_diff_generated === true || artifacts.some((artifact) => artifactMatches(artifact, "schema_diff", "schema"))) {
+      return { status: "passed", reason: "Schema diff artifact was verified from the dry-run result." };
+    }
+    return { status: "missing", reason: "Dry-run result does not include a schema diff artifact." };
+  }
+
+  if (resultPayload.backup_exists === true || artifacts.some((artifact) => artifactMatches(artifact, "database_backup", "backup"))) {
+    return { status: "passed", reason: "Backup artifact was verified from the dry-run result." };
+  }
+  return { status: "missing", reason: "Dry-run result does not include a backup artifact." };
+}
+
+function artifactMatches(artifact: Record<string, unknown>, expectedType: string, textNeedle: string) {
+  const type = typeof artifact.type === "string" ? artifact.type.toLowerCase() : "";
+  const artifactId = typeof artifact.artifact_id === "string" ? artifact.artifact_id.toLowerCase() : "";
+  return type === expectedType || type.includes(textNeedle) || artifactId.includes(textNeedle);
+}
+
+function recordArray(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry)) : [];
 }
 
 function triStateDirective(value: unknown, passingValue: string, passReason: string, failReason: string): EvidenceDirective | null {

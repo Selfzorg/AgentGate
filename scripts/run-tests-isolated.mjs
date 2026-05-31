@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 
-const repoRoot = resolve(new URL("..", import.meta.url).pathname);
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const baseDatabaseUrl = process.env.DATABASE_URL ?? envFileValue("DATABASE_URL");
 
@@ -14,22 +15,34 @@ if (!baseDatabaseUrl) {
 }
 
 const explicitTestUrl = process.env.AGENTGATE_TEST_DATABASE_URL;
-const testDatabaseUrl = explicitTestUrl ?? derivedTestDatabaseUrl(baseDatabaseUrl);
+const schemaIsolation = !explicitTestUrl && shouldUseSchemaIsolation(baseDatabaseUrl);
+const schemaIsolationConfig = schemaIsolation ? derivedTestSchemaUrl(baseDatabaseUrl) : null;
+const testDatabaseUrl = explicitTestUrl ?? schemaIsolationConfig?.databaseUrl ?? derivedTestDatabaseUrl(baseDatabaseUrl);
+const setupDatabaseUrl = prismaSetupUrl(testDatabaseUrl);
 const testDatabaseName = new URL(testDatabaseUrl).pathname.replace(/^\/+/, "");
-const shouldDropDatabase = !explicitTestUrl && process.env.AGENTGATE_KEEP_TEST_DB !== "true";
+const shouldDropDatabase = !explicitTestUrl && !schemaIsolation && process.env.AGENTGATE_KEEP_TEST_DB !== "true";
+const shouldDropSchema = Boolean(schemaIsolationConfig) && process.env.AGENTGATE_KEEP_TEST_DB !== "true";
 
 try {
-  if (!explicitTestUrl) {
+  if (schemaIsolationConfig) {
+    await createSchema(baseDatabaseUrl, schemaIsolationConfig.schemaName);
+  } else if (!explicitTestUrl) {
     await createDatabase(baseDatabaseUrl, testDatabaseName);
   }
 
-  run("pnpm", ["prisma", "migrate", "deploy"], { DATABASE_URL: testDatabaseUrl });
-  run("pnpm", ["prisma", "db", "seed"], { DATABASE_URL: testDatabaseUrl });
-  run("pnpm", ["exec", "vitest", "run", ...args], {
+  run("pnpm", ["prisma", "migrate", "deploy"], { DATABASE_URL: setupDatabaseUrl });
+  run("pnpm", ["prisma", "db", "seed"], { DATABASE_URL: setupDatabaseUrl });
+  run("pnpm", ["exec", "vitest", "run", ...vitestArgsFor(testDatabaseUrl, args)], {
     DATABASE_URL: testDatabaseUrl,
     NODE_ENV: "test"
   });
 } finally {
+  if (shouldDropSchema && schemaIsolationConfig) {
+    await dropSchema(baseDatabaseUrl, schemaIsolationConfig.schemaName).catch((error) => {
+      console.error(`Failed to drop isolated test schema ${schemaIsolationConfig.schemaName}: ${error.message}`);
+    });
+  }
+
   if (shouldDropDatabase) {
     await dropDatabase(baseDatabaseUrl, testDatabaseName).catch((error) => {
       console.error(`Failed to drop isolated test database ${testDatabaseName}: ${error.message}`);
@@ -62,11 +75,67 @@ function derivedTestDatabaseUrl(databaseUrl) {
   return parsed.toString();
 }
 
+function shouldUseSchemaIsolation(databaseUrl) {
+  if (process.env.AGENTGATE_TEST_ISOLATION === "schema") return true;
+  if (process.env.AGENTGATE_TEST_ISOLATION === "database") return false;
+
+  const parsed = new URL(databaseUrl);
+  const baseName = parsed.pathname.replace(/^\/+/, "");
+  return baseName === "postgres";
+}
+
+function vitestArgsFor(databaseUrl, requestedArgs) {
+  if (!shouldSerializeVitest(databaseUrl, requestedArgs)) return requestedArgs;
+  return ["--no-file-parallelism", "--maxWorkers=1", "--maxConcurrency=1", ...requestedArgs];
+}
+
+function shouldSerializeVitest(databaseUrl, requestedArgs) {
+  if (process.env.AGENTGATE_TEST_SERIAL === "true") return true;
+  if (process.env.AGENTGATE_TEST_SERIAL === "false") return false;
+  if (
+    requestedArgs.some(
+      (arg) => arg === "--no-file-parallelism" || arg === "--fileParallelism=false" || arg.startsWith("--maxWorkers")
+    )
+  ) {
+    return false;
+  }
+
+  const parsed = new URL(databaseUrl);
+  return parsed.searchParams.get("pgbouncer") === "true";
+}
+
+function derivedTestSchemaUrl(databaseUrl) {
+  const parsed = new URL(databaseUrl);
+  const schemaName = `agentgate_test_${Date.now()}_${process.pid}`;
+  parsed.searchParams.set("schema", schemaName);
+
+  return {
+    databaseUrl: parsed.toString(),
+    schemaName
+  };
+}
+
+function prismaSetupUrl(databaseUrl) {
+  const parsed = new URL(databaseUrl);
+  parsed.searchParams.set("statement_cache_size", "0");
+  return parsed.toString();
+}
+
 async function createDatabase(databaseUrl, databaseName) {
   validateDatabaseName(databaseName);
   const admin = adminClient(databaseUrl);
   try {
     await admin.$executeRawUnsafe(`CREATE DATABASE "${databaseName}"`);
+  } finally {
+    await admin.$disconnect();
+  }
+}
+
+async function createSchema(databaseUrl, schemaName) {
+  validateDatabaseName(schemaName);
+  const admin = adminClient(databaseUrl);
+  try {
+    await admin.$executeRawUnsafe(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
   } finally {
     await admin.$disconnect();
   }
@@ -82,13 +151,23 @@ async function dropDatabase(databaseUrl, databaseName) {
   }
 }
 
+async function dropSchema(databaseUrl, schemaName) {
+  validateDatabaseName(schemaName);
+  const admin = adminClient(databaseUrl);
+  try {
+    await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+  } finally {
+    await admin.$disconnect();
+  }
+}
+
 function adminClient(databaseUrl) {
   const parsed = new URL(databaseUrl);
   parsed.pathname = "/postgres";
   return new PrismaClient({
     datasources: {
       db: {
-        url: parsed.toString()
+        url: prismaSetupUrl(parsed.toString())
       }
     }
   });
@@ -100,15 +179,21 @@ function validateDatabaseName(databaseName) {
   }
 }
 
+
 function run(command, commandArgs, env) {
   const result = spawnSync(command, commandArgs, {
     cwd: repoRoot,
     stdio: "inherit",
+    shell: process.platform === "win32",
     env: {
       ...process.env,
       ...env
     }
   });
+
+  if (result.error) {
+    throw new Error(`${command} ${commandArgs.join(" ")} failed to start: ${result.error.message}`);
+  }
 
   if (result.status !== 0) {
     process.exitCode = result.status ?? 1;

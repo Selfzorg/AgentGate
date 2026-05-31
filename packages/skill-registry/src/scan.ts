@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { classifySkillCandidate } from "./classifier";
 import { parseMarkdownFrontmatter, stringFrom, stringListFrom } from "./frontmatter";
+import { normalizeEvidenceTaskSpecs } from "./evidence-task-specs";
 import { scanMcpConfigs, scanNativeConnectorManifests } from "./scan-mcp";
 import {
   collectFiles,
@@ -9,6 +10,7 @@ import {
   executionSnapshotFor,
   hashSkillDirectory,
   maxMarkdownParseBytes,
+  normalizeRelativePath,
   readMarkdownForScan
 } from "./scan-file-utils";
 import {
@@ -164,11 +166,13 @@ async function candidateFromFile(input: {
     input.target.pattern === "skill_directory" ? await hashSkillDirectory(skillDirectory, input.file) : null;
   const parsed = parseMarkdownFrontmatter(markdown.contentForParse);
   const declaredTools = declaredToolsFrom(parsed.frontmatter, stringListFrom);
+  const evidenceTaskSpecs = normalizeEvidenceTaskSpecs(parsed.frontmatter.evidence_tasks ?? parsed.frontmatter.evidenceTasks);
+  const dryRunMetadata = recordFrom(parsed.frontmatter.dry_run ?? parsed.frontmatter.dryRun);
   const dynamicShell = dynamicShellBlocksFrom(parsed.body);
   const sourceRelativePath =
     input.target.scope === "user"
-      ? join(userScopePrefix(input.target.sourceType), relative(input.target.rootDir, input.file))
-      : relative(input.workspaceRoot, input.file);
+      ? normalizeRelativePath(join(userScopePrefix(input.target.sourceType), relative(input.target.rootDir, input.file)))
+      : normalizeRelativePath(relative(input.workspaceRoot, input.file));
   const sourceName = sourceNameFor(input.file, input.target.sourceType);
   const name = stringFrom(parsed.frontmatter.name, parsed.frontmatter.title, sourceName) ?? sourceName;
   const description = stringFrom(parsed.frontmatter.description, firstParagraph(parsed.body));
@@ -181,7 +185,7 @@ async function candidateFromFile(input: {
   });
   const contentHash = directoryHash?.contentHash ?? markdown.contentHash;
   const runtimePlan = runtimesFor(input.target.sourceType, classification.skillType);
-  const warnings = [...classification.warnings];
+  const warnings = [...classification.warnings, ...evidenceTaskSpecs.warnings];
   const executionSnapshot = executionSnapshotFor({
     relativePath: sourceRelativePath,
     markdown: markdown.contentForParse,
@@ -223,6 +227,7 @@ async function candidateFromFile(input: {
     allowedRuntimes: runtimePlan.allowed,
     preferredRuntimes: runtimePlan.preferred,
     warnings,
+    evidenceTasks: evidenceTaskSpecs.tasks,
     metadata: {
       frontmatter: parsed.frontmatter,
       source_directory: skillDirectory,
@@ -242,9 +247,22 @@ async function candidateFromFile(input: {
         declaredTools
       }),
       environments: stringListFrom(parsed.frontmatter.environments ?? parsed.frontmatter.environment),
+      evidence_tasks: evidenceTaskSpecs.tasks,
+      supports_dry_run: booleanFrom(parsed.frontmatter.supports_dry_run ?? parsed.frontmatter.supportsDryRun) || Object.keys(dryRunMetadata).length > 0,
+      dry_run: dryRunMetadata,
       required_evidence: stringListFrom(parsed.frontmatter.required_evidence ?? parsed.frontmatter.requiredEvidence),
       approver_roles: stringListFrom(parsed.frontmatter.approver_roles ?? parsed.frontmatter.approverRoles),
       owners: stringListFrom(parsed.frontmatter.owners)
     }
   };
+}
+
+function booleanFrom(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.toLowerCase() === "true";
+  return false;
+}
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }

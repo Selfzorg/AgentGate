@@ -27,6 +27,16 @@ const importParamsSchema = z.object({
   batch_id: z.string().min(1)
 });
 
+const evidenceTaskSchema = z.object({
+  check_key: z.string().min(1),
+  label: z.string().min(1),
+  evidence_skill_id: z.string().min(1).optional(),
+  instructions: z.string().optional(),
+  success_criteria: z.array(z.string().min(1)).optional(),
+  allowed_actions: z.array(z.string().min(1)).optional(),
+  target_files: z.array(z.string().min(1)).optional()
+});
+
 const approveBodySchema = z
   .object({
     candidate_ids: z.array(z.string().min(1)).optional(),
@@ -35,7 +45,8 @@ const approveBodySchema = z
         z.object({
           candidate_id: z.string().min(1),
           required_checks: z.array(z.string().min(1)).optional(),
-          policy_aliases: z.array(z.string().min(1)).optional()
+          policy_aliases: z.array(z.string().min(1)).optional(),
+          evidence_tasks: z.array(evidenceTaskSchema).optional()
         })
       )
       .optional(),
@@ -94,7 +105,16 @@ export const registerRegistryRoutes: FastifyPluginAsync = async (app) => {
       candidateReviews: body.candidate_reviews?.map((review) => ({
         candidateId: review.candidate_id,
         requiredChecks: review.required_checks,
-        policyAliases: review.policy_aliases
+        policyAliases: review.policy_aliases,
+        evidenceTasks: review.evidence_tasks?.map((task) => ({
+          check_key: task.check_key,
+          label: task.label,
+          evidence_skill_id: task.evidence_skill_id,
+          instructions: task.instructions ?? "",
+          success_criteria: task.success_criteria ?? [],
+          allowed_actions: task.allowed_actions ?? [],
+          target_files: task.target_files ?? []
+        }))
       })),
       reviewedBy: body.reviewed_by,
       comment: body.comment,

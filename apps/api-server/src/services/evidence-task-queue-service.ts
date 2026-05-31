@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { normalizeEvidenceTaskSpecs } from "@agentgate/skill-registry";
 import { emitAuditEvent } from "./audit-event-service";
 import { executeEvidenceRuntime } from "./evidence-runtimes";
 import { allowedRuntimesForTask, evidenceSkillFromTask, taskAllowsRuntime } from "./evidence-task-builders";
@@ -420,12 +421,16 @@ export async function processEvidenceTasksOnce({
     });
     const inputRecord = recordFrom(current.input);
     const evidenceSkill = evidenceSkillFromTask(current);
+    const evidenceTaskSpec = normalizeEvidenceTaskSpecs(inputRecord.evidence_task ? [inputRecord.evidence_task] : []).tasks[0];
     const result = await executeEvidenceRuntime({
       checkKey: current.checkKey,
       label: current.label,
       attempt: current.attempt,
       context: {
         ...recordFrom(current.skillRun.context),
+        ...(inputRecord.dry_run_result ? { dry_run_result: inputRecord.dry_run_result } : {}),
+        ...(inputRecord.dry_run_artifacts ? { dry_run_artifacts: inputRecord.dry_run_artifacts } : {}),
+        ...(inputRecord.dry_run_metadata ? { dry_run_metadata: inputRecord.dry_run_metadata } : {}),
         evidence_runtime_overrides: {
           [current.checkKey]: ["local_deterministic"]
         }
@@ -433,7 +438,8 @@ export async function processEvidenceTasksOnce({
       rawAction: current.skillRun.rawAction,
       targetSkillId: stringFrom(inputRecord.target_skill_id) ?? current.skillRun.skill?.skillId ?? resolvedSkillId(current.skillRun.resolvedSkillSnapshot),
       requestedBy: agentId,
-      evidenceSkill
+      evidenceSkill,
+      evidenceTaskSpec
     });
 
     const completedTask = await completeEvidenceTask(prisma, {

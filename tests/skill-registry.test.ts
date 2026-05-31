@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveRegistryCandidate, scanAgentSkills } from "@agentgate/skill-registry";
+import { normalizeEvidenceTaskSpecs, resolveRegistryCandidate, scanAgentSkills } from "@agentgate/skill-registry";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, describe, expect, it } from "vitest";
 import { createApp } from "../apps/api-server/src/app";
@@ -13,6 +13,42 @@ afterAll(async () => {
 });
 
 describe("skill registry scanner", () => {
+  it("accepts read_only as a broad read-only evidence action", () => {
+    const result = normalizeEvidenceTaskSpecs([
+      {
+        check_key: "verified_file_present",
+        label: "Verified file present",
+        instructions: "Read verified.md and confirm it exists.",
+        allowed_actions: ["read_only"]
+      }
+    ]);
+
+    expect(result.warnings).toEqual([]);
+    expect(result.tasks[0]).toMatchObject({
+      check_key: "verified_file_present",
+      allowed_actions: ["read_only"]
+    });
+  });
+
+  it("accepts reusable attached evidence skills without repeated inline instructions", () => {
+    const result = normalizeEvidenceTaskSpecs([
+      {
+        check_key: "ci_passed",
+        label: "CI passed",
+        evidence_skill_id: "verify-ci-status"
+      }
+    ]);
+
+    expect(result.warnings).toEqual([]);
+    expect(result.tasks[0]).toMatchObject({
+      check_key: "ci_passed",
+      label: "CI passed",
+      evidence_skill_id: "verify-ci-status",
+      instructions: "",
+      allowed_actions: []
+    });
+  });
+
   it("discovers Codex skills with stable source metadata and conservative risk classification", async () => {
     await withTempWorkspace(async (workspace) => {
       const skillDir = join(workspace, ".agents", "skills", "deploy-service");
@@ -77,6 +113,49 @@ describe("skill registry scanner", () => {
         defaultRiskLevel: "low",
         declaredTools: ["Read", "Grep", "Bash(git status:*)"],
         allowedRuntimes: ["claude_cli", "claude_code_mcp", "local_deterministic"]
+      });
+    });
+  });
+
+  it("imports dry-run frontmatter metadata into registry candidate config", async () => {
+    await withTempWorkspace(async (workspace) => {
+      const skillDir = join(workspace, ".agents", "skills", "refund-money");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: Refund Money",
+          "description: Process a production refund with a dry-run preview.",
+          "supports_dry_run: true",
+          "dry_run:",
+          "  required_checks:",
+          "    - dry_run_completed",
+          "  evidence_tasks:",
+          "    - check_key: dry_run_completed",
+          "      label: Dry-run completed",
+          "      instructions: Verify the dry-run result completed.",
+          "      allowed_actions:",
+          "        - read_only",
+          "---",
+          "",
+          "Preview refund effects before live execution."
+        ].join("\n"),
+        "utf8"
+      );
+
+      const scan = await scanAgentSkills({ rootDir: workspace });
+      expect(scan.candidates).toHaveLength(1);
+      expect(scan.candidates[0]?.metadata).toMatchObject({
+        supports_dry_run: true,
+        dry_run: {
+          required_checks: ["dry_run_completed"],
+          evidence_tasks: [
+            {
+              check_key: "dry_run_completed"
+            }
+          ]
+        }
       });
     });
   });

@@ -13,7 +13,7 @@ import { createGateCheckResults } from "./gate-check-service";
 import { createId } from "./id";
 import { mergeRequiredChecks } from "./imported-skill-governance";
 import { loadActivePolicyRules } from "./policy-registry-service";
-import { resolveImportedRegistrySkill } from "./registry-resolution-service";
+import { hydrateResolvedSkillFromActiveVersion, resolveImportedRegistrySkill } from "./registry-resolution-service";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -59,10 +59,15 @@ export function createDecisionService({
         source: request.source,
         context: request.context
       });
-      const resolvedSkill = importedResolution.resolvedSkill ?? resolveSkill({
+      const baseResolvedSkill = importedResolution.resolvedSkill ?? resolveSkill({
         rawAction: request.raw_action,
         toolName: request.tool.tool_name,
         context: request.context
+      });
+      const resolvedSkill = await hydrateResolvedSkillFromActiveVersion(prisma, {
+        tenantId: request.tenant_id,
+        workspaceId: request.workspace_id,
+        resolvedSkill: baseResolvedSkill
       });
 
       const risk = scoreRisk({
@@ -85,7 +90,11 @@ export function createDecisionService({
         context: request.context
       });
       const importedRequiredChecks = Array.isArray(resolvedSkill.required_checks) ? resolvedSkill.required_checks : [];
-      const requiredChecks = mergeRequiredChecks(policy.required_checks, importedRequiredChecks);
+      const importedEvidenceTaskChecks = Array.isArray(resolvedSkill.evidence_tasks)
+        ? resolvedSkill.evidence_tasks.map((task) => task.check_key)
+        : [];
+      const skillRequiredChecks = mergeRequiredChecks(importedRequiredChecks, importedEvidenceTaskChecks);
+      const requiredChecks = mergeRequiredChecks(policy.required_checks, skillRequiredChecks);
       const mode = governanceModeFromContext(request.context);
       const effectiveDecision = mode === "enforce" ? policy.decision : "ALLOW";
       const effectiveReason =
@@ -153,7 +162,8 @@ export function createDecisionService({
             decision: effectiveDecision,
             mode,
             policy_required_checks: policy.required_checks,
-            imported_required_checks: importedRequiredChecks,
+            imported_required_checks: skillRequiredChecks,
+            imported_evidence_tasks: resolvedSkill.evidence_tasks ?? [],
             required_checks: requiredChecks,
             approvers: policy.approvers,
             missing_checks: missingChecks,
@@ -177,6 +187,7 @@ export function createDecisionService({
             skillRunId: runId,
             skillId: resolvedSkill.skill_id,
             requiredChecks,
+            evidenceTasks: resolvedSkill.evidence_tasks ?? [],
             context: request.context,
             mode: shouldCollectEvidence ? "pending" : "context"
           });
@@ -196,7 +207,8 @@ export function createDecisionService({
               policy: policy.matched_policy?.policy_id ?? null,
               reason: effectiveReason,
               policy_required_checks: policy.required_checks,
-              imported_required_checks: importedRequiredChecks,
+              imported_required_checks: skillRequiredChecks,
+              imported_evidence_tasks: resolvedSkill.evidence_tasks ?? [],
               required_checks: requiredChecks,
               resolved_skill: resolvedSkill,
               risk

@@ -1,3 +1,5 @@
+import type { SkillEvidenceTaskSpec } from "./evidence-task-specs";
+
 export type SkillRegistrySourceType =
   | "codex_skill"
   | "claude_skill"
@@ -36,6 +38,7 @@ export type SkillRegistryCandidate = {
   allowedRuntimes: SkillRegistryRuntime[];
   preferredRuntimes: SkillRegistryRuntime[];
   warnings: string[];
+  evidenceTasks?: SkillEvidenceTaskSpec[];
   metadata: Record<string, unknown>;
 };
 

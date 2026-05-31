@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --port ${WEB_PORT:-3000}",
+    "dev": "node ../../scripts/web-dashboard-dev.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

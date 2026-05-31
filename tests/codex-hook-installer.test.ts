@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 type InstallerModule = {
@@ -14,7 +13,7 @@ let installer: InstallerModule;
 let tempDirs: string[] = [];
 
 beforeAll(async () => {
-  installer = (await import(pathToFileURL(join(process.cwd(), "scripts/install-codex-hook.mjs")).href)) as InstallerModule;
+  installer = (await import("../scripts/install-codex-hook.mjs")) as InstallerModule;
 });
 
 afterEach(async () => {

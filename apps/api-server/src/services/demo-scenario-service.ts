@@ -143,6 +143,12 @@ async function runDatabaseMigrationScenario(input: { prisma: PrismaClient; confi
     configDir: input.configDir
   });
   steps.push({ name: "dry_run", status: String(dryRun.status), detail: dryRun.body });
+  await processEvidenceTasksOnce({
+    prisma: input.prisma,
+    skillRunId: decision.run_id,
+    limit: 50,
+    agentId: "demo_scenario_dry_run_evidence_worker"
+  });
 
   const approval = await input.prisma.approvalRequest.findUniqueOrThrow({ where: { skillRunId: decision.run_id } });
   const approved = await approveRequest(input.prisma, {

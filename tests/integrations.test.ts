@@ -1,5 +1,3 @@
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import type { AddressInfo } from "node:net";
 import type { FastifyInstance } from "fastify";
 import { PrismaClient } from "@prisma/client";
@@ -85,15 +83,11 @@ beforeAll(async () => {
   const address = app.server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${address.port}`;
 
-  hook = (await import(pathToFileURL(join(process.cwd(), ".agentgate/hooks/claude-pretooluse.mjs")).href)) as HookModule;
-  normalizer = (await import(
-    pathToFileURL(join(process.cwd(), ".agentgate/hooks/lib/normalize-claude-event.mjs")).href
-  )) as NormalizerModule;
-  codexHook = (await import(pathToFileURL(join(process.cwd(), ".agentgate/hooks/codex-pretooluse.mjs")).href)) as HookModule;
-  codexNormalizer = (await import(
-    pathToFileURL(join(process.cwd(), ".agentgate/hooks/lib/normalize-codex-event.mjs")).href
-  )) as CodexNormalizerModule;
-  hookRedact = (await import(pathToFileURL(join(process.cwd(), ".agentgate/hooks/lib/redact.mjs")).href)) as HookRedactModule;
+  hook = (await import("../.agentgate/hooks/claude-pretooluse.mjs")) as HookModule;
+  normalizer = (await import("../.agentgate/hooks/lib/normalize-claude-event.mjs")) as NormalizerModule;
+  codexHook = (await import("../.agentgate/hooks/codex-pretooluse.mjs")) as HookModule;
+  codexNormalizer = (await import("../.agentgate/hooks/lib/normalize-codex-event.mjs")) as CodexNormalizerModule;
+  hookRedact = (await import("../.agentgate/hooks/lib/redact.mjs")) as HookRedactModule;
 });
 
 afterAll(async () => {

@@ -257,17 +257,30 @@ describe("PR1 governance scenario harness", () => {
       dry_run_result: {
         status: "completed"
       },
-      missing_checks: []
+      missing_checks: ["backup_exists", "dry_run_completed", "schema_diff_generated"]
     });
+    expect(dryRun.body.evidence_tasks).toHaveLength(3);
 
     dryRunRun = await getRunRecord(dryRunDecision.run_id);
     expect(dryRunRun).toMatchObject({
       decision: "REQUIRE_APPROVAL",
-      status: "approval_required"
+      status: "approval_pending"
     });
     expect(dryRunRun.dryRunResult).toMatchObject({
       status: "completed",
       summary: "Schema diff generated. 2 tables altered, 1 index added."
+    });
+    expect(dryRunRun.approvalRequest).toMatchObject({
+      status: "pending",
+      approvalReadiness: "collecting"
+    });
+    expect(dryRunRun.gateCheckResults.every((check) => check.status === "running")).toBe(true);
+
+    await processEvidenceForRun(dryRunDecision.run_id, "phase3_dry_run_evidence_worker");
+    dryRunRun = await getRunRecord(dryRunDecision.run_id);
+    expect(dryRunRun).toMatchObject({
+      decision: "REQUIRE_APPROVAL",
+      status: "approval_required"
     });
     expect(dryRunRun.approvalRequest).toMatchObject({
       status: "pending",

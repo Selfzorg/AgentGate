@@ -39,6 +39,7 @@ export type ClaudeEvidenceWorkerConfig = {
   runtime: string;
   driver: AgentDriver;
   agentCommand: string | undefined;
+  codexCommand: string | undefined;
   model: string | undefined;
   workspaceDir: string;
   allowedTools: string;

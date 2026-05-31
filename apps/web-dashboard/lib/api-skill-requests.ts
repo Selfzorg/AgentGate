@@ -1,4 +1,4 @@
-import type { SkillImportBatch, SkillRecord, SkillRegistryScan } from "./api-types";
+import type { EvidenceTaskSpec, SkillImportBatch, SkillRecord, SkillRegistryScan } from "./api-types";
 import { apiBaseUrl } from "./api-config";
 
 export async function getSkills(options: { source?: string; includeInactive?: boolean } = {}): Promise<{ skills: SkillRecord[] }> {
@@ -80,6 +80,7 @@ export async function approveSkillImportBatch(
       candidateId: string;
       requiredChecks?: string[];
       policyAliases?: string[];
+      evidenceTasks?: EvidenceTaskSpec[];
     }>;
     owners?: string[];
     approverRoles?: string[];
@@ -94,7 +95,8 @@ export async function approveSkillImportBatch(
       candidate_reviews: input.candidateReviews?.map((review) => ({
         candidate_id: review.candidateId,
         required_checks: review.requiredChecks,
-        policy_aliases: review.policyAliases
+        policy_aliases: review.policyAliases,
+        evidence_tasks: review.evidenceTasks
       })),
       owners: input.owners,
       approver_roles: input.approverRoles,
@@ -108,6 +110,28 @@ export async function approveSkillImportBatch(
   }
 
   return (await response.json()) as { import_batch: SkillImportBatch; imported: unknown[]; skipped: unknown[]; disabled: unknown[] };
+}
+
+export async function updateSkillEvidenceTasks(
+  skillId: string,
+  evidenceTasks: EvidenceTaskSpec[]
+): Promise<{ skill_version: { id: string; skill_id: string; version: string; status: string; evidence_tasks: EvidenceTaskSpec[] } }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/skills/${encodeURIComponent(skillId)}/evidence-tasks`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      evidence_tasks: evidenceTasks
+    }),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as {
+    skill_version: { id: string; skill_id: string; version: string; status: string; evidence_tasks: EvidenceTaskSpec[] };
+  };
 }
 
 export async function rejectSkillImportBatch(batchId: string, comment?: string): Promise<{ import_batch: SkillImportBatch }> {

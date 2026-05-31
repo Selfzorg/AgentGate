@@ -1,8 +1,9 @@
-import type { SkillImportCandidate, SkillRecord } from "@/lib/api-client";
+import type { EvidenceTaskSpec, SkillImportCandidate, SkillRecord } from "@/lib/api-client";
 
 export type CandidateReviewDraft = {
   requiredChecks: string;
   policyAliases: string;
+  evidenceTasks: EvidenceTaskSpec[];
 };
 
 export type EvidenceCheckOption = {
@@ -10,6 +11,12 @@ export type EvidenceCheckOption = {
   label: string;
   description: string;
   source: "registered" | "built_in" | "custom";
+};
+
+export type EvidenceSkillOption = {
+  skill_id: string;
+  name: string;
+  check_key: string;
 };
 
 const evidenceAliases: Record<string, string> = {
@@ -88,10 +95,68 @@ export function reviewDraftsForCandidates(candidates: SkillImportCandidate[]) {
 }
 
 export function defaultReviewDraft(candidate: SkillImportCandidate): CandidateReviewDraft {
+  const evidenceTasks = evidenceTasksForCandidate(candidate);
   return {
-    requiredChecks: (candidate.inferred_required_checks ?? inferredRequiredChecksForCandidate(candidate)).join(", "),
-    policyAliases: (candidate.inferred_policy_aliases ?? inferPolicyAliasesForCandidate(candidate)).join(", ")
+    requiredChecks: (evidenceTasks.length > 0
+      ? evidenceTasks.map((task) => task.check_key)
+      : candidate.inferred_required_checks ?? inferredRequiredChecksForCandidate(candidate)
+    ).join(", "),
+    policyAliases: (candidate.inferred_policy_aliases ?? inferPolicyAliasesForCandidate(candidate)).join(", "),
+    evidenceTasks
   };
+}
+
+export function evidenceTasksForCandidate(candidate: { evidence_tasks?: EvidenceTaskSpec[]; metadata: Record<string, unknown> }) {
+  if (candidate.evidence_tasks) return candidate.evidence_tasks;
+  return evidenceTasksFromUnknown(candidate.metadata.evidence_tasks);
+}
+
+export function evidenceTasksFromSkill(skill: SkillRecord) {
+  if (skill.evidence_tasks) return skill.evidence_tasks;
+  return evidenceTasksFromUnknown(skill.config.evidence_tasks);
+}
+
+export function evidenceSkillOptionsFromSkills(skills: SkillRecord[]): EvidenceSkillOption[] {
+  return skills
+    .flatMap((skill) => {
+      if (skill.category !== "evidence" || skill.status !== "active" || skill.version_status !== "active") return [];
+      const checkKey = stringFrom(skill.config.check_key);
+      const sideEffectLevel = stringFrom(skill.config.side_effect_level);
+      const skillType = stringFrom(skill.config.skill_type);
+      if (!checkKey || sideEffectLevel !== "read_only" || skillType !== "evidence") return [];
+      return [
+        {
+          skill_id: skill.skill_id,
+          name: skill.name,
+          check_key: checkKey
+        }
+      ];
+    })
+    .sort((left, right) => left.skill_id.localeCompare(right.skill_id));
+}
+
+export function evidenceTasksFromUnknown(value: unknown): EvidenceTaskSpec[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const record = recordFrom(entry);
+    const checkKey = stringFrom(record.check_key);
+    const label = stringFrom(record.label);
+    const evidenceSkillId = stringFrom(record.evidence_skill_id);
+    const instructions = stringFrom(record.instructions) ?? "";
+    const allowedActions = stringArray(record.allowed_actions);
+    if (!checkKey || !label || (!evidenceSkillId && (!instructions || allowedActions.length === 0))) return [];
+    return [
+      {
+        check_key: checkKey,
+        label,
+        ...(evidenceSkillId ? { evidence_skill_id: evidenceSkillId } : {}),
+        instructions,
+        success_criteria: stringArray(record.success_criteria),
+        allowed_actions: allowedActions,
+        target_files: stringArray(record.target_files)
+      }
+    ];
+  });
 }
 
 export function rawRequiredEvidenceForCandidate(candidate: { metadata: Record<string, unknown>; required_evidence_raw?: string[] }) {

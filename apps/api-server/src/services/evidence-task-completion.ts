@@ -147,24 +147,24 @@ export async function finishEvidenceTask(
 }
 
 export async function updateApprovalReadiness(prisma: Prisma.TransactionClient, skillRunId: string) {
-  await prisma.$queryRaw`SELECT id FROM "skill_runs" WHERE id = ${skillRunId} FOR UPDATE`;
+  if (!isEmbeddedPglite()) {
+    await prisma.$queryRaw`SELECT id FROM "skill_runs" WHERE id = ${skillRunId} FOR UPDATE`;
+  }
 
-  const [run, gateChecks, activeTasks] = await Promise.all([
-    prisma.skillRun.findUniqueOrThrow({
-      where: { id: skillRunId },
-      include: { approvalRequest: true }
-    }),
-    prisma.gateCheckResult.findMany({
-      where: { skillRunId },
-      orderBy: { checkKey: "asc" }
-    }),
-    prisma.evidenceTask.count({
-      where: {
-        skillRunId,
-        status: { in: [...ACTIVE_EVIDENCE_TASK_STATUSES] }
-      }
-    })
-  ]);
+  const run = await prisma.skillRun.findUniqueOrThrow({
+    where: { id: skillRunId },
+    include: { approvalRequest: true }
+  });
+  const gateChecks = await prisma.gateCheckResult.findMany({
+    where: { skillRunId },
+    orderBy: { checkKey: "asc" }
+  });
+  const activeTasks = await prisma.evidenceTask.count({
+    where: {
+      skillRunId,
+      status: { in: [...ACTIVE_EVIDENCE_TASK_STATUSES] }
+    }
+  });
 
   const missingChecks = gateChecks.filter((check) => check.status !== "passed").map((check) => check.checkKey);
   const readiness = activeTasks > 0 ? "collecting" : missingChecks.length === 0 ? "ready" : "blocked";
@@ -208,9 +208,14 @@ export async function updateApprovalReadiness(prisma: Prisma.TransactionClient, 
 }
 
 export async function nextTaskAttempt(prisma: PrismaClient, gateCheckResultId: string): Promise<number> {
-  const aggregate = await prisma.evidenceTask.aggregate({
+  const latestTask = await prisma.evidenceTask.findFirst({
     where: { gateCheckResultId },
-    _max: { attempt: true }
+    orderBy: { attempt: "desc" },
+    select: { attempt: true }
   });
-  return (aggregate._max.attempt ?? 0) + 1;
+  return (latestTask?.attempt ?? 0) + 1;
+}
+
+function isEmbeddedPglite() {
+  return (process.env.DATABASE_URL ?? "").includes("pgbouncer=true");
 }

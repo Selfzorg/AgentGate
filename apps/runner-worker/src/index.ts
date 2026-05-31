@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { processQueuedRunById, processQueuedRunsOnce, startRunnerLoop, type RunnerLoopHandle } from "./runner-loop";
 
-export { executeSkillRun } from "./orchestrator/execute-skill-run";
+export { dryRunSkillConnector, executeSkillRun, type ConnectorRunContext } from "./orchestrator/execute-skill-run";
 export { processQueuedRunById, processQueuedRunsOnce, startRunnerLoop, type RunnerLoopHandle };
 
 if (process.env.AGENTGATE_STANDALONE_RUNNER === "true") {

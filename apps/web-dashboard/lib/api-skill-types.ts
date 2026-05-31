@@ -13,6 +13,17 @@ export type SkillRecord = {
   connector: string | null;
   config: Record<string, unknown>;
   execution: Record<string, unknown>;
+  evidence_tasks?: EvidenceTaskSpec[];
+};
+
+export type EvidenceTaskSpec = {
+  check_key: string;
+  label: string;
+  evidence_skill_id?: string;
+  instructions: string;
+  success_criteria: string[];
+  allowed_actions: string[];
+  target_files: string[];
 };
 
 export type SkillImportCandidate = {
@@ -34,6 +45,7 @@ export type SkillImportCandidate = {
   preferred_runtimes: string[];
   warnings: string[];
   metadata: Record<string, unknown>;
+  evidence_tasks?: EvidenceTaskSpec[];
   inferred_policy_aliases?: string[];
   inferred_required_checks?: string[];
   required_evidence_raw?: string[];

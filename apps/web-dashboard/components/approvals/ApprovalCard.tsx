@@ -7,7 +7,9 @@ import {
   denyApproval,
   forceDryRun,
   getApprovals,
+  runSkillRunDryRun,
   retryApprovalEvidence,
+  type ApprovalRelatedRunRecord,
   type ApprovalRecord
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -17,6 +19,7 @@ const APPROVAL_PAGE_SIZE = 25;
 
 export function ApprovalCard() {
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+  const [relatedRuns, setRelatedRuns] = useState<ApprovalRelatedRunRecord[]>([]);
   const [status, setStatus] = useState("Loading approval packets...");
   const [comments, setComments] = useState<Record<string, string>>({});
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -37,10 +40,14 @@ export function ApprovalCard() {
     try {
       const response = await getApprovals({ limit: APPROVAL_PAGE_SIZE, offset, ...(query ? { q: query } : {}) });
       const visibleCount = offset + response.approvals.length;
+      const relatedRunCount = response.related_runs?.length ?? 0;
       setApprovals((current) => (options.append ? [...current, ...response.approvals] : response.approvals));
+      setRelatedRuns((current) => (options.append ? current : (response.related_runs ?? [])));
       setPagination(response.pagination);
       setStatus(
-        `${query ? `Search "${query}": ` : ""}Showing ${visibleCount} of ${response.pagination.total} approval packets.`
+        `${query ? `Search "${query}": ` : ""}Showing ${visibleCount} of ${response.pagination.total} approval packets${
+          relatedRunCount > 0 ? `, plus ${relatedRunCount} related run${relatedRunCount === 1 ? "" : "s"} without approval packets.` : "."
+        }`
       );
     } catch {
       setStatus("Approval API unavailable. Start the Phase 2 dev server.");
@@ -84,6 +91,7 @@ export function ApprovalCard() {
       <label className="min-w-0 flex-1 text-sm font-medium">
         Find approval
         <input
+          suppressHydrationWarning
           className="mt-2 w-full rounded-ui border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
           value={searchInput}
           onChange={(event) => setSearchInput(event.target.value)}
@@ -108,12 +116,21 @@ export function ApprovalCard() {
     const description = loading
       ? "Fetching approval packets from the AgentGate API."
       : searchQuery
-        ? "Try a different run ID, trace ID, approval ID, or action."
+        ? relatedRuns.length > 0
+          ? "The matching run has not created an approval packet yet."
+          : "Try a different run ID, trace ID, approval ID, or action."
         : "Replay a production deploy or run the DB migration dry-run from Live Activity to create one.";
 
     return (
       <div className="space-y-4">
         {searchControls}
+        {relatedRuns.length > 0 ? (
+          <RelatedRunSearchResults
+            runs={relatedRuns}
+            pendingAction={pendingAction}
+            onDryRun={(runId) => void runAction("Dry-Run", () => runSkillRunDryRun(runId))}
+          />
+        ) : null}
         <section className="max-w-2xl rounded-ui border border-border bg-surface p-5 shadow-panel">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -219,6 +236,7 @@ export function ApprovalCard() {
                   Approval comment{approval.risk_level === "critical" ? " required" : ""}
                 </label>
                 <textarea
+                  suppressHydrationWarning
                   id={`comment-${approval.id}`}
                   className="mt-2 min-h-20 w-full rounded-ui border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
                   value={comment}
@@ -304,6 +322,61 @@ export function ApprovalCard() {
           </Button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RelatedRunSearchResults({
+  runs,
+  pendingAction,
+  onDryRun
+}: {
+  runs: ApprovalRelatedRunRecord[];
+  pendingAction: string | null;
+  onDryRun: (runId: string) => void;
+}) {
+  return (
+    <div className="grid gap-3">
+      {runs.map((run) => {
+        const canDryRun = run.decision === "FORCE_DRY_RUN" || run.status === "dry_run_required";
+
+        return (
+          <section key={run.id} className="rounded-ui border border-border bg-surface p-5 shadow-panel">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold">{run.skill?.name ?? "Skill run"}</h2>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">{run.reason ?? "This run has no approval packet yet."}</p>
+                <p className="mt-2 font-mono text-xs text-muted">{run.raw_action}</p>
+              </div>
+              <div className="flex flex-wrap justify-start gap-2 md:justify-end">
+                {run.decision ? <StatusBadge kind="decision" value={run.decision} /> : null}
+                {run.risk_level ? <StatusBadge kind="risk" value={run.risk_level} /> : null}
+                <StatusBadge kind="run" value={run.status} />
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {canDryRun ? (
+                <Button variant="secondary" disabled={pendingAction !== null} onClick={() => onDryRun(run.id)}>
+                  <FlaskConical className="h-4 w-4" aria-hidden="true" />
+                  {pendingAction === "Dry-Run" ? "Running" : "Dry-Run"}
+                </Button>
+              ) : null}
+              <Button asChild variant="ghost">
+                <a href={`/skill-runs/${run.id}`}>
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  Review Run
+                </a>
+              </Button>
+              <Button asChild variant="ghost">
+                <a href={`/audit/${run.trace_id}`}>
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  Open Trace
+                </a>
+              </Button>
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }

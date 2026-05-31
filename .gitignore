@@ -4,10 +4,14 @@ dist/
 coverage/
 .env
 .env.local
+.claude/settings.local.json
 .DS_Store
 *.log
 *.tsbuildinfo
 tmp/
 .postgres/
+.pglite/
+.tmp-pglite/
 .agentgate/logs/
 .agentgate/run/
+verified.md

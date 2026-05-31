@@ -25,19 +25,19 @@ export function commandSpecFor(config: ClaudeEvidenceWorkerConfig) {
   if (config.driver === "codex") {
     const args = [
       "exec",
+      "-c",
+      'approval_policy="never"',
       "--cd",
       config.workspaceDir,
       "--sandbox",
       "read-only",
-      "--ask-for-approval",
-      "never",
-      "--ephemeral",
+      "--skip-git-repo-check",
       "--color",
       "never",
       "-"
     ];
     if (config.model) args.splice(1, 0, "--model", config.model);
-    return { command: "codex", args };
+    return { command: config.codexCommand ?? "codex", args };
   }
 
   const args = [

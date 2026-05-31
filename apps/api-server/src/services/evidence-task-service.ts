@@ -1,4 +1,6 @@
 import { Prisma, type EvidenceTask, type PrismaClient } from "@prisma/client";
+import { normalizeEvidenceTaskSpecs } from "@agentgate/skill-registry";
+import type { EvidenceTaskSpec } from "@agentgate/core-types";
 import { emitAuditEvent } from "./audit-event-service";
 import { findReusableEvidenceArtifact } from "./evidence-artifact-cache-service";
 import { subagentForCheck } from "./evidence-runtimes";
@@ -6,7 +8,7 @@ import { evidenceSkillSnapshot, evidenceTaskCreateData, preferredRuntime } from 
 import { nextTaskAttempt, updateApprovalReadiness } from "./evidence-task-completion";
 import { serializeApproval, serializeEvidenceTask, serializeGateCheck } from "./evidence-task-presenters";
 import { ACTIVE_EVIDENCE_TASK_STATUSES } from "./evidence-task-types";
-import { resolveEvidenceSkill } from "./evidence-skill-registry";
+import { resolveEvidenceSkill, type EvidenceSkillDefinition } from "./evidence-skill-registry";
 import { recordFrom } from "./object-utils";
 
 export type { EvidenceTaskResultInput } from "./evidence-task-types";
@@ -40,6 +42,7 @@ export async function createEvidenceTasksForRun({
       gateCheckResults: {
         orderBy: { checkKey: "asc" }
       },
+      dryRunResult: true,
       skill: true,
       agent: true
     }
@@ -65,29 +68,44 @@ export async function createEvidenceTasksForRun({
   }
 
   const context = recordFrom(run.context);
-  const plans = await Promise.all(
-    targetChecks.map(async (check) => {
-      const evidenceSkill = await resolveEvidenceSkill({
-        prisma,
-        tenantId: run.tenantId,
-        workspaceId: run.workspaceId,
-        checkKey: check.checkKey
-      });
-      return {
-        check,
-        attempt: await nextTaskAttempt(prisma, check.id),
-        evidenceSkill,
-        selectedRuntime: preferredRuntime(evidenceSkill, context, check.checkKey),
-        cachedEvidence: await findReusableEvidenceArtifact(prisma, {
-          tenantId: run.tenantId,
-          workspaceId: run.workspaceId,
-          checkKey: check.checkKey,
-          context: run.context,
-          environment: run.environment
-        })
-      };
-    })
+  const plans: Array<{
+    check: (typeof targetChecks)[number];
+    attempt: number;
+    evidenceSkill: EvidenceSkillDefinition;
+    selectedRuntime: ReturnType<typeof preferredRuntime>;
+    evidenceTaskSpec: EvidenceTaskSpec | undefined;
+    cachedEvidence: Awaited<ReturnType<typeof findReusableEvidenceArtifact>>;
+  }> = [];
+  const evidenceTaskByCheck = new Map(
+    normalizeEvidenceTaskSpecs(recordFrom(run.resolvedSkillSnapshot).evidence_tasks).tasks.map((task) => [task.check_key, task])
   );
+  for (const check of targetChecks) {
+    const evidenceTaskSpec = evidenceTaskByCheck.get(check.checkKey);
+    const evidenceSkill = await resolveEvidenceSkill({
+      prisma,
+      tenantId: run.tenantId,
+      workspaceId: run.workspaceId,
+      checkKey: check.checkKey,
+      evidenceSkillId: evidenceTaskSpec?.evidence_skill_id
+    });
+    const attempt = check.status === "pending" ? 1 : await nextTaskAttempt(prisma, check.id);
+    const cachedEvidence = await findReusableEvidenceArtifact(prisma, {
+      tenantId: run.tenantId,
+      workspaceId: run.workspaceId,
+      checkKey: check.checkKey,
+      context: run.context,
+      environment: run.environment
+    });
+
+    plans.push({
+      check,
+      attempt,
+      evidenceSkill,
+      selectedRuntime: preferredRuntime(evidenceSkill, context, check.checkKey),
+      evidenceTaskSpec,
+      cachedEvidence
+    });
+  }
 
   const result = await prisma.$transaction(async (tx) => {
     await tx.skillRun.update({
@@ -184,7 +202,9 @@ export async function createEvidenceTasksForRun({
           attempt: plan.attempt,
           evidenceSkill: plan.evidenceSkill,
           selectedRuntime: plan.selectedRuntime,
-          requestedBy
+          evidenceTaskSpec: plan.evidenceTaskSpec,
+          requestedBy,
+          extraInput: dryRunEvidenceInput(run.dryRunResult)
         })
       });
       tasks.push(task);
@@ -201,6 +221,7 @@ export async function createEvidenceTasksForRun({
             attempt: plan.attempt,
             evidence_task_id: task.id,
             selected_runtime: plan.selectedRuntime,
+            ...(plan.evidenceTaskSpec ? { evidence_task: plan.evidenceTaskSpec } : {}),
             subagent,
             evidence_skill: evidenceSkillSnapshot(plan.evidenceSkill)
           } as Prisma.InputJsonValue
@@ -244,5 +265,36 @@ export async function createEvidenceTasksForRun({
       evidence_tasks: result.tasks.map(serializeEvidenceTask),
       missing_checks: result.missingChecks
     }
+  };
+}
+
+function dryRunEvidenceInput(
+  dryRunResult:
+    | {
+        id: string;
+        status: string;
+        summary: string;
+        result: unknown;
+        artifacts: unknown;
+        createdAt: Date;
+        updatedAt: Date;
+      }
+    | null
+    | undefined
+): Record<string, unknown> | undefined {
+  if (!dryRunResult) return undefined;
+  const result = recordFrom(dryRunResult.result);
+  return {
+    dry_run_result: {
+      id: dryRunResult.id,
+      status: dryRunResult.status,
+      summary: dryRunResult.summary,
+      result: dryRunResult.result,
+      artifacts: dryRunResult.artifacts,
+      created_at: dryRunResult.createdAt.toISOString(),
+      updated_at: dryRunResult.updatedAt.toISOString()
+    },
+    dry_run_artifacts: Array.isArray(dryRunResult.artifacts) ? dryRunResult.artifacts : [],
+    dry_run_metadata: recordFrom(result.metadata)
   };
 }

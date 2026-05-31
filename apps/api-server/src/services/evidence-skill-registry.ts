@@ -1,4 +1,5 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
+import { createId } from "./id";
 import { recordFrom, stringFrom } from "./object-utils";
 
 export const evidenceRuntimeIds = [
@@ -20,6 +21,7 @@ export type EvidenceSkillDefinition = {
   checkKey: string;
   skillId: string;
   name: string;
+  description?: string | null | undefined;
   version: string;
   connectorId: string | null;
   skillType: EvidenceSkillType;
@@ -27,6 +29,7 @@ export type EvidenceSkillDefinition = {
   allowedRuntimes: EvidenceRuntimeId[];
   preferredRuntimes: EvidenceRuntimeId[];
   registrySource: EvidenceSkillRegistrySource;
+  executionSnapshot?: Record<string, unknown> | undefined;
 };
 
 const defaultAllowedRuntimes: EvidenceRuntimeId[] = [
@@ -71,51 +74,80 @@ export async function resolveEvidenceSkill({
   prisma,
   tenantId,
   workspaceId,
-  checkKey
+  checkKey,
+  evidenceSkillId
 }: {
   prisma: PrismaClient;
   tenantId: string;
   workspaceId: string;
   checkKey: string;
+  evidenceSkillId?: string | undefined;
 }): Promise<EvidenceSkillDefinition> {
+  if (evidenceSkillId) {
+    const attached = await resolveEvidenceSkillById({
+      prisma,
+      tenantId,
+      workspaceId,
+      skillId: evidenceSkillId,
+      fallbackCheckKey: checkKey
+    });
+    if (attached) return attached;
+  }
+
+  const builtInFallback = builtInEvidenceSkills[checkKey];
+  if (builtInFallback) {
+    return materializeFallbackEvidenceSkill(prisma, {
+      tenantId,
+      workspaceId,
+      fallback: {
+        ...builtInFallback,
+        registrySource: "built_in_fallback"
+      }
+    });
+  }
+
+  const fallback = builtIn(checkKey, `verify-${checkKey}`, labelForCheck(checkKey), null);
+  if (isEmbeddedPglite()) {
+    return materializeFallbackEvidenceSkill(prisma, {
+      tenantId,
+      workspaceId,
+      fallback: {
+        ...fallback,
+        registrySource: "built_in_fallback"
+      }
+    });
+  }
+
   const skills = await prisma.skill.findMany({
     where: {
       tenantId,
       workspaceId,
-      status: "active"
-    },
-    include: {
-      versions: {
-        where: { status: "active" },
-        orderBy: { createdAt: "desc" }
-      }
+      status: "active",
+      category: "evidence"
     }
   });
 
   for (const skill of skills) {
-    for (const version of skill.versions) {
+    const versions = await prisma.skillVersion.findMany({
+      where: {
+        skillRecordId: skill.id,
+        status: "active"
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    for (const version of versions) {
       const config = recordFrom(version.config);
       if (stringFrom(config.check_key) !== checkKey) continue;
 
-      const skillType = skillTypeFrom(config.skill_type);
-      const sideEffectLevel = sideEffectLevelFrom(config.side_effect_level);
-
-      return {
-        checkKey,
-        skillId: skill.skillId,
-        name: skill.name,
-        version: version.version,
-        connectorId: version.connectorId,
-        skillType,
-        sideEffectLevel,
-        allowedRuntimes: runtimeListFrom(config.allowed_runtimes, defaultAllowedRuntimes),
-        preferredRuntimes: runtimeListFrom(config.preferred_runtimes, defaultPreferredRuntimes),
-        registrySource: "database"
-      };
+      return definitionFromSkillVersion({
+        skill,
+        version,
+        fallbackCheckKey: checkKey
+      });
     }
   }
 
-  const fallback = builtInEvidenceSkills[checkKey] ?? builtIn(checkKey, `verify-${checkKey}`, labelForCheck(checkKey), null);
   return materializeFallbackEvidenceSkill(prisma, {
     tenantId,
     workspaceId,
@@ -126,8 +158,95 @@ export async function resolveEvidenceSkill({
   });
 }
 
+export async function validateEvidenceTaskAttachments(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  input: {
+    tenantId: string;
+    workspaceId: string;
+    tasks: Array<{ check_key: string; evidence_skill_id?: string | undefined }>;
+  }
+): Promise<string[]> {
+  const warnings: string[] = [];
+  for (const task of input.tasks) {
+    if (!task.evidence_skill_id) continue;
+    const evidenceSkill = await resolveEvidenceSkillById({
+      prisma,
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      skillId: task.evidence_skill_id,
+      fallbackCheckKey: task.check_key
+    });
+    if (!evidenceSkill) {
+      warnings.push(`Evidence task ${task.check_key} references missing evidence skill ${task.evidence_skill_id}.`);
+      continue;
+    }
+    if (evidenceSkill.skillType !== "evidence") {
+      warnings.push(`Evidence task ${task.check_key} references ${task.evidence_skill_id}, but it is not an evidence skill.`);
+    }
+    if (evidenceSkill.sideEffectLevel !== "read_only") {
+      warnings.push(`Evidence task ${task.check_key} references ${task.evidence_skill_id}, but it is not read-only.`);
+    }
+  }
+  return warnings;
+}
+
+async function resolveEvidenceSkillById({
+  prisma,
+  tenantId,
+  workspaceId,
+  skillId,
+  fallbackCheckKey
+}: {
+  prisma: PrismaClient | Prisma.TransactionClient;
+  tenantId: string;
+  workspaceId: string;
+  skillId: string;
+  fallbackCheckKey: string;
+}): Promise<EvidenceSkillDefinition | null> {
+  const builtIn = Object.values(builtInEvidenceSkills).find((skill) => skill.skillId === skillId);
+  if (builtIn) {
+    return materializeFallbackEvidenceSkill(prisma, {
+      tenantId,
+      workspaceId,
+      fallback: {
+        ...builtIn,
+        registrySource: "built_in_fallback"
+      }
+    });
+  }
+
+  const skill = await prisma.skill.findUnique({
+    where: {
+      tenantId_workspaceId_skillId: {
+        tenantId,
+        workspaceId,
+        skillId
+      }
+    },
+    include: {
+      versions: {
+        where: { status: "active" },
+        orderBy: { createdAt: "desc" },
+        take: 1
+      }
+    }
+  });
+  const version = skill?.versions[0];
+  if (!skill || !version || skill.status !== "active") return null;
+
+  return definitionFromSkillVersion({
+    skill,
+    version,
+    fallbackCheckKey
+  });
+}
+
+function isEmbeddedPglite() {
+  return (process.env.DATABASE_URL ?? "").includes("pgbouncer=true");
+}
+
 async function materializeFallbackEvidenceSkill(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   input: {
     tenantId: string;
     workspaceId: string;
@@ -150,7 +269,7 @@ async function materializeFallbackEvidenceSkill(
         }
       },
       create: {
-        id: `skill_${input.fallback.skillId.replaceAll("-", "_")}`,
+        id: createId("skill"),
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         skillId: input.fallback.skillId,
@@ -174,7 +293,7 @@ async function materializeFallbackEvidenceSkill(
         }
       },
       create: {
-        id: `${skill.id}_v${version.replaceAll(".", "_")}`,
+        id: createId("skillver"),
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
         skillRecordId: skill.id,
@@ -203,6 +322,33 @@ async function materializeFallbackEvidenceSkill(
   } catch {
     return input.fallback;
   }
+}
+
+function definitionFromSkillVersion({
+  skill,
+  version,
+  fallbackCheckKey
+}: {
+  skill: { skillId: string; name: string; description: string | null; category: string };
+  version: { version: string; connectorId: string | null; config: unknown };
+  fallbackCheckKey: string;
+}): EvidenceSkillDefinition {
+  const config = recordFrom(version.config);
+  const executionSnapshot = recordFrom(config.execution_snapshot);
+  return {
+    checkKey: stringFrom(config.check_key) ?? fallbackCheckKey,
+    skillId: skill.skillId,
+    name: skill.name,
+    description: skill.description,
+    version: version.version,
+    connectorId: version.connectorId,
+    skillType: skill.category === "evidence" ? skillTypeFrom(config.skill_type) : "execution",
+    sideEffectLevel: sideEffectLevelFrom(config.side_effect_level),
+    allowedRuntimes: runtimeListFrom(config.allowed_runtimes, defaultAllowedRuntimes),
+    preferredRuntimes: runtimeListFrom(config.preferred_runtimes, defaultPreferredRuntimes),
+    registrySource: "database",
+    ...(Object.keys(executionSnapshot).length > 0 ? { executionSnapshot } : {})
+  };
 }
 
 function skillConfig(skill: EvidenceSkillDefinition) {

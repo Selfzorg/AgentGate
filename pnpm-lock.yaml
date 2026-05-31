@@ -33,6 +33,12 @@ importers:
       '@agentgate/skill-resolver':
         specifier: workspace:*
         version: link:packages/skill-resolver
+      '@electric-sql/pglite':
+        specifier: 0.4.6
+        version: 0.4.6
+      '@electric-sql/pglite-socket':
+        specifier: 0.1.6
+        version: 0.1.6(@electric-sql/pglite@0.4.6)
       '@eslint/js':
         specifier: ^9.15.0
         version: 9.39.4
@@ -269,6 +275,15 @@ packages:
   '@babel/runtime@7.29.7':
     resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
     engines: {node: '>=6.9.0'}
+
+  '@electric-sql/pglite-socket@0.1.6':
+    resolution: {integrity: sha512-QAPUOwUdFnv3grJoLQbtkN8MywMK92kPfCeQ9QIJlB9DfPlExvU19cI2djxyffRF2WJL89eiZ1GAyfBDVH2xGQ==}
+    hasBin: true
+    peerDependencies:
+      '@electric-sql/pglite': 0.4.6
+
+  '@electric-sql/pglite@0.4.6':
+    resolution: {integrity: sha512-qmlmfN8UyKCee35qkV0r/MBp+Znl8FjBz7OpoglNvww3GJpw0/DLP0o1ZymvLNmcD5DTLOQdzKPtF8Hd3mdl1w==}
 
   '@emnapi/runtime@1.10.0':
     resolution: {integrity: sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA==}
@@ -2622,6 +2637,12 @@ snapshots:
   '@alloc/quick-lru@5.2.0': {}
 
   '@babel/runtime@7.29.7': {}
+
+  '@electric-sql/pglite-socket@0.1.6(@electric-sql/pglite@0.4.6)':
+    dependencies:
+      '@electric-sql/pglite': 0.4.6
+
+  '@electric-sql/pglite@0.4.6': {}
 
   '@emnapi/runtime@1.10.0':
     dependencies:

@@ -65,7 +65,7 @@ export async function hashSkillDirectory(
 
   for (const file of files) {
     const fileStat = await stat(file);
-    const relativeFile = relative(skillDirectory, file);
+    const relativeFile = normalizeRelativePath(relative(skillDirectory, file));
     hash.update(`path:${relativeFile}\nsize:${fileStat.size}\n`);
     await updateHashFromFile(hash, file);
     hash.update("\n");
@@ -158,7 +158,7 @@ export function executionSnapshotFor(input: {
   return {
     version: "agentgate.skill_execution_snapshot.v1",
     format: "markdown",
-    entrypoint_path: input.relativePath,
+    entrypoint_path: normalizeRelativePath(input.relativePath),
     entrypoint_content: markdown.text,
     body: body.text,
     frontmatter: input.frontmatter,
@@ -168,6 +168,10 @@ export function executionSnapshotFor(input: {
     max_bytes: maxExecutionSnapshotBytes,
     truncated: input.sourceFileTruncated || markdown.truncated || body.truncated
   };
+}
+
+export function normalizeRelativePath(path: string): string {
+  return path.replaceAll("\\", "/");
 }
 
 export function hashString(value: string): string {

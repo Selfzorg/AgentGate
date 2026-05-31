@@ -14,7 +14,10 @@ This is the safest way to judge AgentGate: run it locally from GitHub, import th
 
 - Node.js 22 or newer.
 - Corepack.
-- Homebrew PostgreSQL 16 for the built-in local DB helper, or your own `DATABASE_URL`.
+- The built-in local DB helper, or your own `DATABASE_URL`.
+  - macOS Homebrew and standard Windows PostgreSQL install paths are auto-detected.
+  - If PostgreSQL is installed somewhere else, set `POSTGRES_BIN_DIR` to the directory containing `initdb`, `pg_ctl`, `createdb`, and `psql`.
+  - If PostgreSQL CLI tools are not available, the helper falls back to Docker using `postgres:16-alpine`, then to embedded PGlite.
 - Claude Code for the live Claude path. Without Claude Code, use the golden CLI scenarios below.
 
 ## Five-Minute Setup
@@ -24,7 +27,6 @@ git clone <your-agentgate-repo-url>
 cd AgentGate
 corepack enable
 corepack prepare pnpm@11.3.0 --activate
-pnpm install
 pnpm demo:bootstrap
 pnpm demo:local
 ```
@@ -34,10 +36,31 @@ Open:
 - Dashboard: `http://localhost:3001`
 - API health: `http://localhost:4000/health`
 
+In another terminal, verify the running demo:
+
+```sh
+pnpm demo:verify
+```
+
 If port `3001` is busy:
 
 ```sh
-WEB_PORT=3022 pnpm demo:local
+pnpm demo:local -- --port 3022
+```
+
+`pnpm demo:local` chooses the evidence worker at startup:
+
+1. `codex_cli` if the `codex` CLI is available.
+2. `claude_code_mcp` if the `claude` CLI is available.
+3. `local_deterministic` only when no agent CLI is available.
+
+Override the choice when needed:
+
+```sh
+pnpm demo:local -- --evidence-runtime codex
+pnpm demo:local -- --evidence-runtime claude
+pnpm demo:local -- --evidence-runtime local
+pnpm demo:local -- --evidence-runtime none
 ```
 
 ## Start Claude Code
@@ -102,8 +125,10 @@ Expected result:
 To complete demo evidence deterministically:
 
 ```sh
-pnpm evidence:process
+pnpm demo:local -- --evidence-runtime local
 ```
+
+By default, `pnpm demo:local` starts the API, dashboard, and the best available evidence worker. It prefers Codex, then Claude, and falls back to the deterministic local worker. If you are not using `demo:local`, run `pnpm evidence:claude-worker` for an agent worker, `pnpm evidence:worker` for the deterministic local worker, or `pnpm evidence:process` once to process queued evidence.
 
 Then:
 
@@ -117,7 +142,7 @@ Then:
 Expected visible side effect for the imported demo skill:
 
 ```sh
-tail -n 5 ecommerce_operations.log
+pnpm demo:log
 ```
 
 You should see a line like:
@@ -167,7 +192,6 @@ Use the printed run IDs and trace IDs to inspect:
 
 ```sh
 pnpm demo:reset
-rm -f ecommerce_operations.log
 ```
 
 Stop local Postgres when finished:
@@ -178,13 +202,19 @@ pnpm postgres:stop
 
 ## Verification
 
-Before sharing the repo:
+For demo readiness while `pnpm demo:local` is running:
+
+```sh
+pnpm demo:verify
+```
+
+Before sharing the repo, run the full project gate against native PostgreSQL or Docker Postgres:
 
 ```sh
 pnpm verify
 ```
 
-This runs lint, TypeScript checks, database-isolated migrations/seeding, and the full Vitest suite.
+This runs lint, TypeScript checks, database-isolated migrations/seeding, and the full Vitest suite. The embedded PGlite fallback is intended for local demo startup; the full test suite expects native PostgreSQL behavior.
 
 ## Troubleshooting
 
@@ -193,7 +223,9 @@ This runs lint, TypeScript checks, database-isolated migrations/seeding, and the
 - MCP tool list stale: run `pnpm mcp:build`, then restart Claude Code.
 - Skills not found: scan with an empty Skill Root from this repo root, or paste the absolute repo path.
 - Evidence stuck on `management_approval_token`: that is a custom evidence key by design. Use `prod-deployment` for a complete happy path, or add a custom worker/connector for that check.
-- Port conflict: run `WEB_PORT=3022 pnpm demo:local` and open `http://localhost:3022`.
+- Existing database: put its connection string in `.env`, then run `pnpm demo:bootstrap -- --skip-postgres`.
+- Fresh dependency install: `pnpm demo:bootstrap` runs `pnpm install` if required dependencies are missing. Use `pnpm demo:bootstrap -- --skip-install` only after installing dependencies yourself.
+- Port conflict: run `pnpm demo:local -- --port 3022` and open `http://localhost:3022`.
 
 ## Safety Boundary
 

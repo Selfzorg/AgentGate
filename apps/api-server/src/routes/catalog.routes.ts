@@ -1,6 +1,10 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
+import { normalizeEvidenceTaskSpecs, type SkillEvidenceTaskSpec } from "@agentgate/skill-registry";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { emitAuditEvent } from "../services/audit-event-service";
+import { validateEvidenceTaskAttachments } from "../services/evidence-skill-registry";
+import { createId } from "../services/id";
 import {
   exportPolicyPack,
   importPolicyPack,
@@ -15,6 +19,25 @@ const skillsQuerySchema = z.object({
 const skillVersionParamsSchema = z.object({
   id: z.string().min(1),
   version: z.string().min(1)
+});
+
+const skillParamsSchema = z.object({
+  id: z.string().min(1)
+});
+
+const evidenceTaskSchema = z.object({
+  check_key: z.string().min(1),
+  label: z.string().min(1),
+  evidence_skill_id: z.string().min(1).optional(),
+  instructions: z.string().optional(),
+  success_criteria: z.array(z.string().min(1)).optional(),
+  allowed_actions: z.array(z.string().min(1)).optional(),
+  target_files: z.array(z.string().min(1)).optional()
+});
+
+const updateEvidenceTasksSchema = z.object({
+  evidence_tasks: z.array(evidenceTaskSchema),
+  updated_by: z.string().min(1).optional()
 });
 
 const tenantWorkspaceQuerySchema = z.object({
@@ -83,10 +106,31 @@ export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
           version_status: version?.status ?? "archived",
           connector: version?.connector?.connectorId ?? null,
           config: version?.config ?? {},
-          execution: version?.execution ?? {}
+          execution: version?.execution ?? {},
+          evidence_tasks: normalizeEvidenceTaskSpecs(recordFrom(version?.config).evidence_tasks).tasks
         };
       })
     };
+  });
+
+  app.post("/skills/:id/evidence-tasks", async (request, reply) => {
+    const params = skillParamsSchema.parse(request.params);
+    const body = updateEvidenceTasksSchema.parse(request.body);
+    const result = await updateSkillEvidenceTasks(app.services.prisma, {
+      skillIdentifier: params.id,
+      evidenceTasks: body.evidence_tasks.map((task) => ({
+        check_key: task.check_key,
+        label: task.label,
+        evidence_skill_id: task.evidence_skill_id,
+        instructions: task.instructions ?? "",
+        success_criteria: task.success_criteria ?? [],
+        allowed_actions: task.allowed_actions ?? [],
+        target_files: task.target_files ?? []
+      })),
+      updatedBy: body.updated_by
+    });
+
+    return reply.code(result.status).send(result.body);
   });
 
   app.post("/skills/:id/versions/:version/enable", async (request, reply) => {
@@ -266,6 +310,136 @@ async function setSkillVersionStatus(
         status: updated.status,
         config: updated.config,
         execution: updated.execution
+      }
+    }
+  };
+}
+
+async function updateSkillEvidenceTasks(
+  prisma: PrismaClient,
+  input: {
+    skillIdentifier: string;
+    evidenceTasks: SkillEvidenceTaskSpec[];
+    updatedBy?: string | undefined;
+  }
+) {
+  const normalized = normalizeEvidenceTaskSpecs(input.evidenceTasks, { sourceLabel: "evidence_tasks" });
+  if (normalized.warnings.length > 0 || normalized.tasks.length !== input.evidenceTasks.length) {
+    return {
+      status: 400 as const,
+      body: {
+        error: "Invalid evidence tasks",
+        warnings: normalized.warnings
+      }
+    };
+  }
+
+  const skill = await prisma.skill.findFirst({
+    where: {
+      OR: [{ id: input.skillIdentifier }, { skillId: input.skillIdentifier }]
+    },
+    include: {
+      versions: {
+        where: { status: "active" },
+        orderBy: { createdAt: "desc" },
+        take: 1
+      }
+    }
+  });
+
+  if (!skill) return { status: 404 as const, body: { error: "Skill not found" } };
+  const activeVersion = skill.versions[0];
+  if (!activeVersion) return { status: 409 as const, body: { error: "Skill does not have an active version" } };
+
+  const attachmentWarnings = await validateEvidenceTaskAttachments(prisma, {
+    tenantId: skill.tenantId,
+    workspaceId: skill.workspaceId,
+    tasks: normalized.tasks
+  });
+  if (attachmentWarnings.length > 0) {
+    return {
+      status: 400 as const,
+      body: {
+        error: "Invalid evidence tasks",
+        warnings: attachmentWarnings
+      }
+    };
+  }
+
+  const checkKeys = normalized.tasks.map((task) => task.check_key);
+  const now = new Date();
+  const nextVersion = `evidence-${createId("rev").replace(/^rev_/, "").slice(0, 12)}`;
+  const nextConfig = {
+    ...recordFrom(activeVersion.config),
+    evidence_tasks: normalized.tasks,
+    required_checks: checkKeys,
+    evidence_review: {
+      ...recordFrom(recordFrom(activeVersion.config).evidence_review),
+      reviewed_required_checks: checkKeys,
+      evidence_tasks: normalized.tasks,
+      edited_at: now.toISOString(),
+      edited_by: input.updatedBy ?? "user_service_owner",
+      source: "skills_registry"
+    }
+  };
+
+  const created = await prisma.$transaction(async (tx) => {
+    await tx.skillVersion.updateMany({
+      where: {
+        skillRecordId: skill.id,
+        status: "active"
+      },
+      data: { status: "inactive" }
+    });
+
+    const skillVersion = await tx.skillVersion.create({
+      data: {
+        id: createId("skillver"),
+        tenantId: skill.tenantId,
+        workspaceId: skill.workspaceId,
+        skillRecordId: skill.id,
+        connectorId: activeVersion.connectorId,
+        version: nextVersion,
+        status: "active",
+        config: nextConfig as Prisma.InputJsonValue,
+        execution: (activeVersion.execution ?? {}) as Prisma.InputJsonValue
+      }
+    });
+
+    await tx.skill.update({
+      where: { id: skill.id },
+      data: { status: "active" }
+    });
+
+    await emitAuditEvent(tx, {
+      tenantId: skill.tenantId,
+      workspaceId: skill.workspaceId,
+      traceId: createId("trc"),
+      eventType: "skill.evidence_tasks.updated",
+      actorType: "user",
+      actorId: input.updatedBy ?? "user_service_owner",
+      metadata: {
+        skill_id: skill.skillId,
+        previous_version: activeVersion.version,
+        new_version: nextVersion,
+        evidence_tasks: normalized.tasks
+      }
+    });
+
+    return skillVersion;
+  });
+
+  return {
+    status: 201 as const,
+    body: {
+      skill_version: {
+        id: created.id,
+        skill_id: skill.skillId,
+        version: created.version,
+        status: created.status,
+        config: created.config,
+        execution: created.execution,
+        evidence_tasks: normalized.tasks
       }
     }
   };

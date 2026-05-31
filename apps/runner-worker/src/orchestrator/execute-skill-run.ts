@@ -7,6 +7,15 @@ import { githubDemoConnector } from "../connectors/github-demo-connector";
 import { appendExecutionLog } from "../logs/append-execution-log";
 import { validateExecutionControls } from "./execution-controls";
 
+export type ConnectorRunContext = {
+  id: string;
+  traceId: string;
+  rawAction: string;
+  context: unknown;
+  resolvedSkillSnapshot: unknown;
+  skill?: { skillId: string } | null;
+};
+
 export async function executeSkillRun(prisma: PrismaClient, runId: string) {
   const run = await prisma.skillRun.findUnique({
     where: { id: runId },
@@ -87,11 +96,7 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
     }
 
     const connector = connectorForRun(run.resolvedSkillSnapshot, skillId, connectorName);
-    const input: SkillInput = {
-      skill_id: skillId,
-      raw_action: run.rawAction,
-      context: run.context as Record<string, unknown>
-    };
+    const input = skillInputForRun(run, skillId);
     const validation = await connector.validateInputs(input);
 
     if (!validation.valid) {
@@ -169,6 +174,38 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
       summary: error instanceof Error ? error.message : "Connector execution failed."
     }, connectorName);
   }
+}
+
+export async function dryRunSkillConnector(run: ConnectorRunContext) {
+  const skillId = run.skill?.skillId ?? resolvedSkillId(run.resolvedSkillSnapshot);
+  const connectorName = connectorNameForRun(run.resolvedSkillSnapshot, skillId);
+  const connector = connectorForRun(run.resolvedSkillSnapshot, skillId, connectorName);
+  const input = skillInputForRun(run, skillId);
+  const validation = await connector.validateInputs(input);
+
+  if (!validation.valid) {
+    return {
+      skillId,
+      connectorName,
+      result: {
+        status: "failed" as const,
+        summary: "Connector input validation failed.",
+        artifacts: [],
+        metadata: { errors: validation.errors }
+      }
+    };
+  }
+
+  const result = await connector.dryRun(input, {
+    skill_run_id: run.id,
+    trace_id: run.traceId,
+    metadata: {
+      connector: connectorName,
+      dry_run: true
+    }
+  });
+
+  return { skillId, connectorName, result };
 }
 
 async function markRunFailed(
@@ -346,6 +383,14 @@ function connectorNameForRun(snapshot: unknown, skillId: string): string {
   if (sourceType === "claude_skill" || sourceType === "claude_command" || sourceType === "claude_subagent") return "claude-cli-adapter";
   if (sourceType === "codex_skill") return "codex-cli-adapter";
   return connectorNameForSkill(skillId);
+}
+
+function skillInputForRun(run: ConnectorRunContext, skillId: string): SkillInput {
+  return {
+    skill_id: skillId,
+    raw_action: run.rawAction,
+    context: run.context && typeof run.context === "object" && !Array.isArray(run.context) ? (run.context as Record<string, unknown>) : {}
+  };
 }
 
 function importedSourceType(snapshot: unknown): string | null {

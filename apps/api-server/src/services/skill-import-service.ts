@@ -1,6 +1,7 @@
-import { scanAgentSkills, type ScanAgentSkillsResult } from "@agentgate/skill-registry";
+import { scanAgentSkills, type ScanAgentSkillsResult, type SkillEvidenceTaskSpec } from "@agentgate/skill-registry";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { emitAuditEvent } from "./audit-event-service";
+import { validateEvidenceTaskAttachments } from "./evidence-skill-registry";
 import { createId } from "./id";
 import {
   candidateCreateData,
@@ -31,6 +32,7 @@ export type ApproveImportInput = {
     candidateId: string;
     requiredChecks?: string[] | undefined;
     policyAliases?: string[] | undefined;
+    evidenceTasks?: SkillEvidenceTaskSpec[] | undefined;
   }> | undefined;
   reviewedBy?: string | undefined;
   comment?: string | undefined;
@@ -155,8 +157,34 @@ export async function approveRegistryImportBatch(prisma: PrismaClient, input: Ap
         owners: input.owners ?? [],
         approverRoles: input.approverRoles ?? [],
         requiredChecks: candidateReview?.requiredChecks,
-        policyAliases: candidateReview?.policyAliases
+        policyAliases: candidateReview?.policyAliases,
+        evidenceTasks: candidateReview?.evidenceTasks
       });
+      const attachmentWarnings = await validateEvidenceTaskAttachments(tx, {
+        tenantId: candidate.tenantId,
+        workspaceId: candidate.workspaceId,
+        tasks: reviewMetadata.evidenceTasks
+      });
+      if (attachmentWarnings.length > 0) {
+        await tx.skillImportCandidate.update({
+          where: { id: candidate.id },
+          data: {
+            reviewStatus: "failed",
+            reviewNotes: {
+              reason: "invalid_evidence_task_attachment",
+              warnings: attachmentWarnings,
+              reviewed_by: input.reviewedBy ?? "user_service_owner"
+            } as Prisma.InputJsonValue
+          }
+        });
+        disabled.push({
+          candidate_id: candidate.candidateId,
+          skill_id: candidate.skillId,
+          version,
+          reason: attachmentWarnings.join(" ")
+        });
+        continue;
+      }
       const activeByReview = canImportActive(candidate, {
         owners: reviewMetadata.owners,
         approverRoles: reviewMetadata.approverRoles
@@ -238,6 +266,7 @@ export async function approveRegistryImportBatch(prisma: PrismaClient, input: Ap
             approverRoles: reviewMetadata.approverRoles,
             requiredChecks: reviewMetadata.requiredChecks,
             policyAliases: reviewMetadata.policyAliases,
+            evidenceTasks: reviewMetadata.evidenceTasks,
             evidenceWarnings: reviewMetadata.evidenceWarnings,
             activeByReview
           }) as Prisma.InputJsonValue,
@@ -258,6 +287,7 @@ export async function approveRegistryImportBatch(prisma: PrismaClient, input: Ap
             active_review_reason: activeByReview.reason,
             required_checks: reviewMetadata.requiredChecks,
             policy_aliases: reviewMetadata.policyAliases,
+            evidence_tasks: reviewMetadata.evidenceTasks,
             evidence_warnings: reviewMetadata.evidenceWarnings
           } as Prisma.InputJsonValue
         }

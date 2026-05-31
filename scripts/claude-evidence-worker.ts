@@ -8,7 +8,8 @@ import { log, processEvidenceTask, safeMarkWorkerStopped, safeRecordWorkerHeartb
 import { listEvidenceTasks } from "./claude-evidence-worker/api-client";
 
 export { commandSpecFor } from "./claude-evidence-worker/command";
-export { configFromEnv } from "./claude-evidence-worker/config";
+export { configFromEnv, resolveCodexCommand } from "./claude-evidence-worker/config";
+export { agentSubprocessOptions, prepareEvidenceTaskForAgent } from "./claude-evidence-worker/agent-runtime";
 export { buildEvidencePrompt, parseAgentOutput } from "./claude-evidence-worker/prompt";
 export type { AgentEvidenceResult, ClaudeEvidenceWorkerConfig } from "./claude-evidence-worker/types";
 

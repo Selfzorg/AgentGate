@@ -146,6 +146,55 @@ export async function getApprovalQueue(prisma: PrismaClient, options: ApprovalQu
       skip: offset
     })
   ]);
+  const relatedRuns = search
+    ? await prisma.skillRun.findMany({
+        where: {
+          AND: [
+            approvalQueueSkillRunSearch(search),
+            {
+              approvalRequest: {
+                is: null
+              }
+            }
+          ]
+        },
+        include: {
+          agent: {
+            select: {
+              externalAgentId: true,
+              role: true,
+              displayName: true
+            }
+          },
+          skill: {
+            select: {
+              skillId: true,
+              name: true
+            }
+          },
+          gateCheckResults: {
+            select: {
+              id: true,
+              checkKey: true,
+              label: true,
+              status: true,
+              evidence: true
+            },
+            orderBy: { checkKey: "asc" }
+          },
+          dryRunResult: {
+            select: {
+              id: true,
+              status: true,
+              summary: true,
+              createdAt: true
+            }
+          }
+        },
+        orderBy: { createdAt: "desc" },
+        take: 5
+      })
+    : [];
 
   return {
     approvals: approvals.map((approval) => ({
@@ -211,12 +260,64 @@ export async function getApprovalQueue(prisma: PrismaClient, options: ApprovalQu
           : null
       }
     })),
+    related_runs: relatedRuns.map((run) => ({
+      id: run.id,
+      trace_id: run.traceId,
+      raw_action: run.rawAction,
+      source: run.source,
+      environment: run.environment,
+      decision: run.decision,
+      status: run.status,
+      reason: run.reason,
+      risk_level: run.riskLevel,
+      risk_score: run.riskScore,
+      created_at: run.createdAt.toISOString(),
+      updated_at: run.updatedAt.toISOString(),
+      agent: run.agent
+        ? {
+            id: run.agent.externalAgentId,
+            role: run.agent.role,
+            display_name: run.agent.displayName
+          }
+        : null,
+      skill: run.skill
+        ? {
+            id: run.skill.skillId,
+            name: run.skill.name
+          }
+        : null,
+      gate_checks: run.gateCheckResults.map((check) => ({
+        id: check.id,
+        check_key: check.checkKey,
+        label: check.label,
+        status: check.status,
+        evidence: check.evidence
+      })),
+      dry_run_result: run.dryRunResult
+        ? {
+            id: run.dryRunResult.id,
+            status: run.dryRunResult.status,
+            summary: run.dryRunResult.summary,
+            created_at: run.dryRunResult.createdAt.toISOString()
+          }
+        : null
+    })),
     pagination: {
       limit,
       offset,
       total,
       has_more: offset + approvals.length < total
     }
+  };
+}
+
+function approvalQueueSkillRunSearch(search: string): Prisma.SkillRunWhereInput {
+  return {
+    OR: [
+      { id: { contains: search, mode: "insensitive" } },
+      { traceId: { contains: search, mode: "insensitive" } },
+      { rawAction: { contains: search, mode: "insensitive" } }
+    ]
   };
 }
 

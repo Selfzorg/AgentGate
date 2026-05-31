@@ -1,4 +1,4 @@
-import { type SkillRegistryCandidate } from "@agentgate/skill-registry";
+import { normalizeEvidenceTaskSpecs, type SkillEvidenceTaskSpec, type SkillRegistryCandidate } from "@agentgate/skill-registry";
 import { Prisma } from "@prisma/client";
 import { createId } from "./id";
 import {
@@ -123,6 +123,7 @@ export function serializeImportBatch(batch: {
         preferred_runtimes: candidate.preferredRuntimes,
         warnings: candidate.warnings,
         metadata: candidate.metadata,
+        evidence_tasks: normalizeEvidenceTaskSpecs(recordFrom(candidate.metadata).evidence_tasks).tasks,
         inferred_policy_aliases: inferPolicyAliasesForCandidate(governanceCandidate),
         inferred_required_checks: inferredRequiredChecks,
         required_evidence_raw: rawRequiredEvidence,
@@ -155,13 +156,21 @@ export function reviewMetadataForCandidate(
     approverRoles: string[];
     requiredChecks?: string[] | undefined;
     policyAliases?: string[] | undefined;
+    evidenceTasks?: SkillEvidenceTaskSpec[] | undefined;
   }
 ) {
   const metadata = recordFrom(candidate.metadata);
   const ownerDefaults = stringArray(metadata.owners);
   const approverDefaults = stringArray(metadata.approver_roles);
+  const reviewedEvidenceTasks = review.evidenceTasks
+    ? normalizeEvidenceTaskSpecs(review.evidenceTasks, { sourceLabel: "candidate_reviews.evidence_tasks" })
+    : normalizeEvidenceTaskSpecs(metadata.evidence_tasks);
   const requiredChecks = normalizeRequiredChecks(
-    review.requiredChecks && review.requiredChecks.length > 0 ? review.requiredChecks : inferredRequiredChecksForCandidate(candidateForGovernance(candidate))
+    reviewedEvidenceTasks.tasks.length > 0
+      ? reviewedEvidenceTasks.tasks.map((task) => task.check_key)
+      : review.requiredChecks && review.requiredChecks.length > 0
+        ? review.requiredChecks
+        : inferredRequiredChecksForCandidate(candidateForGovernance(candidate))
   );
   const rawRequiredEvidence = rawRequiredEvidenceForCandidate(candidate);
 
@@ -173,7 +182,8 @@ export function reviewMetadataForCandidate(
       review.policyAliases && review.policyAliases.length > 0
         ? normalizePolicyAliases(review.policyAliases)
         : inferPolicyAliasesForCandidate(candidateForGovernance(candidate)),
-    evidenceWarnings: evidenceWarningsForChecks(requiredChecks, rawRequiredEvidence)
+    evidenceTasks: reviewedEvidenceTasks.tasks,
+    evidenceWarnings: [...reviewedEvidenceTasks.warnings, ...evidenceWarningsForChecks(requiredChecks, rawRequiredEvidence)]
   };
 }
 
@@ -219,6 +229,7 @@ export function skillVersionConfig(
     approverRoles: string[];
     requiredChecks: string[];
     policyAliases: string[];
+    evidenceTasks: SkillEvidenceTaskSpec[];
     evidenceWarnings: string[];
     activeByReview: { active: boolean; reason: string };
   }
@@ -243,12 +254,16 @@ export function skillVersionConfig(
     owners: input.owners,
     approver_roles: input.approverRoles,
     environments: stringArray(metadata.environments),
+    supports_dry_run: booleanFrom(metadata.supports_dry_run),
+    dry_run: recordFrom(metadata.dry_run),
     required_evidence: rawRequiredEvidence,
     required_checks: input.requiredChecks,
+    evidence_tasks: input.evidenceTasks,
     policy_aliases: input.policyAliases,
     evidence_review: {
       reviewed_required_checks: input.requiredChecks,
       inferred_required_checks: inferredRequiredChecksForCandidate(candidateForGovernance(candidate)),
+      evidence_tasks: input.evidenceTasks,
       required_evidence_raw: rawRequiredEvidence,
       warnings: input.evidenceWarnings
     },
@@ -320,6 +335,12 @@ function stringFrom(value: unknown): string | null {
 
 function numberFrom(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function booleanFrom(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.toLowerCase() === "true";
+  return false;
 }
 
 function recordFrom(value: unknown): Record<string, unknown> {

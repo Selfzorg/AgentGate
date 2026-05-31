@@ -33,10 +33,57 @@ export function parseJsonLoose(value: string): unknown {
   try {
     return JSON.parse(value);
   } catch {
-    const match = value.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("Evidence agent output did not contain JSON.");
-    return JSON.parse(match[0]);
+    const candidates = jsonObjectCandidates(value);
+    for (let index = candidates.length - 1; index >= 0; index -= 1) {
+      try {
+        return JSON.parse(candidates[index]!);
+      } catch {
+        continue;
+      }
+    }
+    throw new Error("Evidence agent output did not contain JSON.");
   }
+}
+
+function jsonObjectCandidates(value: string): string[] {
+  const candidates: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let escaped = false;
+  let inString = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = inString;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        candidates.push(value.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+
+  return candidates;
 }
 
 export function splitCommand(value: string): string[] {

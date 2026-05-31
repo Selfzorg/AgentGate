@@ -45,7 +45,11 @@ describe("AgentGate skill import recovery scope", () => {
       await createCodexSkillSet(workspace, 52);
       await createClaudeFixtures(workspace);
       await createMcpFixtures(workspace);
-      await symlink(join(workspace, ".agents", "skills", "skill-001"), join(workspace, ".agents", "skills", "linked-skill"));
+      await symlink(
+        join(workspace, ".agents", "skills", "skill-001"),
+        join(workspace, ".agents", "skills", "linked-skill"),
+        process.platform === "win32" ? "junction" : "dir"
+      );
 
       const firstScan = await scanAgentSkills({ rootDir: workspace });
       expect(firstScan.summary.total).toBeGreaterThanOrEqual(62);
@@ -87,7 +91,8 @@ describe("AgentGate skill import recovery scope", () => {
 
       const { stdout } = await execFileAsync("pnpm", ["exec", "agentgate", "skills", "scan", "--root", workspace, "--json"], {
         cwd: process.cwd(),
-        maxBuffer: 10 * 1024 * 1024
+        maxBuffer: 10 * 1024 * 1024,
+        shell: process.platform === "win32"
       });
       const cliJson = JSON.parse(stdout);
       expect(cliJson.scan.summary.total).toBe(secondScan.summary.total);
@@ -272,6 +277,349 @@ describe("AgentGate skill import recovery scope", () => {
         await app.close();
       }
     });
+  });
+
+  it("imports structured evidence tasks and uses them when queueing evidence", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createRefundMoneyCommand(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+        const candidate = importResponse.json().import_batch.candidates.find((entry: { name: string }) => entry.name === "refund-money");
+        expect(candidate.evidence_tasks).toEqual([
+          expect.objectContaining({
+            check_key: "customer_file_not_empty",
+            label: "Customer file is present",
+            instructions: "Read customer.md and confirm it exists and is not empty.",
+            allowed_actions: ["read_file"],
+            target_files: ["customer.md"]
+          })
+        ]);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["service_owner"],
+            approver_roles: ["service_owner"],
+            candidate_reviews: [
+              {
+                candidate_id: candidate.candidate_id,
+                policy_aliases: ["deploy-production"],
+                evidence_tasks: [
+                  {
+                    check_key: "customer_file_not_empty",
+                    label: "Customer file is present",
+                    instructions: "Read customer.md and confirm it exists and is not empty.",
+                    success_criteria: ["customer.md exists", "customer.md has non-whitespace content"],
+                    allowed_actions: ["read_file"],
+                    target_files: ["customer.md"]
+                  }
+                ]
+              }
+            ]
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const importedSkill = await prisma.skill.findFirstOrThrow({
+          where: {
+            tenantId,
+            workspaceId,
+            skillId: "claude_command:repo:claude-commands-ecommerce-refund-money"
+          },
+          include: { versions: true }
+        });
+        const config = importedSkill.versions[0]!.config as Record<string, unknown>;
+        expect(config.required_checks).toEqual(["customer_file_not_empty"]);
+        expect(config.evidence_tasks).toEqual([
+          expect.objectContaining({
+            check_key: "customer_file_not_empty",
+            instructions: "Read customer.md and confirm it exists and is not empty."
+          })
+        ]);
+
+        const decision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            source: "claude-code",
+            adapter_type: "hook",
+            agent: {
+              agent_id: "claude_refund_test",
+              agent_type: "claude_code",
+              role: "release_agent"
+            },
+            tool: {
+              tool_name: "Bash"
+            },
+            raw_action: "refund money using refund-money",
+            context: {
+              environment: "production",
+              requested_skill: "refund-money"
+            }
+          }
+        });
+        if (decision.statusCode !== 200) {
+          throw new Error(decision.body);
+        }
+        const decisionBody = decision.json();
+        expect(decisionBody.decision).toBe("REQUIRE_APPROVAL");
+
+        const evidenceTask = await prisma.evidenceTask.findFirstOrThrow({
+          where: {
+            skillRunId: decisionBody.run_id,
+            checkKey: "customer_file_not_empty"
+          }
+        });
+        const taskInput = evidenceTask.input as Record<string, unknown>;
+        expect(taskInput.evidence_task).toMatchObject({
+          check_key: "customer_file_not_empty",
+          instructions: "Read customer.md and confirm it exists and is not empty.",
+          target_files: ["customer.md"]
+        });
+        expect(taskInput.instruction).toBe("Read customer.md and confirm it exists and is not empty.");
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  it("attaches reusable read-only evidence skills without repeating task instructions", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createRefundMoneyCommandWithAttachedEvidence(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      await createReusableCustomerEvidenceSkill(tenantId, workspaceId);
+      const app = await createApp({ prisma, logger: false });
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+        const candidate = importResponse.json().import_batch.candidates.find((entry: { name: string }) => entry.name === "refund-money");
+        expect(candidate.evidence_tasks).toEqual([
+          expect.objectContaining({
+            check_key: "customer_file_not_empty",
+            evidence_skill_id: "verify-customer-file",
+            instructions: "",
+            allowed_actions: []
+          })
+        ]);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["service_owner"],
+            approver_roles: ["service_owner"],
+            candidate_reviews: [
+              {
+                candidate_id: candidate.candidate_id,
+                policy_aliases: ["deploy-production"],
+                evidence_tasks: candidate.evidence_tasks
+              }
+            ]
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const updateResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/skills/${encodeURIComponent("claude_command:repo:claude-commands-ecommerce-refund-money")}/evidence-tasks`,
+          payload: {
+            evidence_tasks: [
+              {
+                check_key: "customer_file_not_empty",
+                label: "Customer file is present",
+                evidence_skill_id: "verify-customer-file"
+              }
+            ]
+          }
+        });
+        expect(updateResponse.statusCode).toBe(201);
+        expect(updateResponse.json().skill_version.evidence_tasks).toEqual([
+          expect.objectContaining({
+            check_key: "customer_file_not_empty",
+            evidence_skill_id: "verify-customer-file"
+          })
+        ]);
+
+        const decision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            source: "claude-code",
+            adapter_type: "hook",
+            agent: {
+              agent_id: "claude_refund_attach_test",
+              agent_type: "claude_code",
+              role: "release_agent"
+            },
+            tool: {
+              tool_name: "Bash"
+            },
+            raw_action: "refund money using refund-money",
+            context: {
+              environment: "production",
+              requested_skill: "refund-money"
+            }
+          }
+        });
+        expect(decision.statusCode).toBe(200);
+
+        const evidenceTask = await prisma.evidenceTask.findFirstOrThrow({
+          where: {
+            skillRunId: decision.json().run_id,
+            checkKey: "customer_file_not_empty"
+          }
+        });
+        expect(evidenceTask.evidenceSkillId).toBe("verify-customer-file");
+        const taskInput = evidenceTask.input as Record<string, unknown>;
+        expect(taskInput.evidence_task).toMatchObject({
+          check_key: "customer_file_not_empty",
+          evidence_skill_id: "verify-customer-file"
+        });
+        expect(taskInput.instruction).toBe("Read customer.md and confirm it exists and is not empty.");
+        expect(taskInput.evidence_skill).toMatchObject({
+          skill_id: "verify-customer-file",
+          execution_snapshot: expect.objectContaining({
+            body: "Read customer.md and confirm it exists and is not empty."
+          })
+        });
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  it("uses active skill-version evidence tasks for static fallback skills", async () => {
+    const tenantId = createdTenantIds.at(-1)!;
+    const workspaceId = workspaceIdForTenant(tenantId);
+    await prisma.skill.create({
+      data: {
+        id: `skill_static_deploy_${tenantId.replace(/[^a-zA-Z0-9]/g, "_")}`,
+        tenantId,
+        workspaceId,
+        skillId: "deploy-production",
+        name: "Deploy Production",
+        category: "deployment",
+        defaultRiskLevel: "high",
+        description: "Deploy Production demo skill",
+        versions: {
+          create: {
+            id: `skillver_static_deploy_${tenantId.replace(/[^a-zA-Z0-9]/g, "_")}`,
+            tenantId,
+            workspaceId,
+            version: "evidence-test",
+            config: {
+              fixture: true,
+              skill_type: "execution",
+              side_effect_level: "mutating",
+              required_checks: ["custom_evidence_1"],
+              evidence_tasks: [
+                {
+                  check_key: "custom_evidence_1",
+                  label: "Custom evidence 1",
+                  instructions: "Read verified.md and confirm it exists and contains \"Run Tests successfully\".",
+                  success_criteria: [],
+                  allowed_actions: ["read_file"],
+                  target_files: ["verified.md"]
+                }
+              ]
+            },
+            execution: {}
+          }
+        }
+      }
+    });
+
+    const app = await createApp({ prisma, logger: false });
+    try {
+      const decision = await app.inject({
+        method: "POST",
+        url: "/api/v1/decision",
+        payload: {
+          tenant_id: tenantId,
+          workspace_id: workspaceId,
+          source: "codex",
+          adapter_type: "hook",
+          agent: {
+            agent_id: "codex_static_fallback_test",
+            agent_type: "codex",
+            role: "release_agent"
+          },
+          tool: {
+            tool_name: "Bash"
+          },
+          raw_action: "vercel deploy --prod",
+          context: {
+            environment: "production",
+            service: "checkout-api"
+          }
+        }
+      });
+      expect(decision.statusCode).toBe(200);
+
+      const run = await prisma.skillRun.findUniqueOrThrow({
+        where: { id: decision.json().run_id },
+        include: {
+          gateCheckResults: true,
+          evidenceTasks: true
+        }
+      });
+      expect(run.resolvedSkillSnapshot).toMatchObject({
+        skill_id: "deploy-production",
+        skill_version: "evidence-test",
+        evidence_tasks: [
+          expect.objectContaining({
+            check_key: "custom_evidence_1",
+            instructions: "Read verified.md and confirm it exists and contains \"Run Tests successfully\"."
+          })
+        ]
+      });
+      expect(run.policySnapshot).toMatchObject({
+        required_checks: expect.arrayContaining([
+          "ci_passed",
+          "tests_passed",
+          "rollback_plan_exists",
+          "staging_deploy_successful",
+          "custom_evidence_1"
+        ])
+      });
+      expect(run.gateCheckResults.map((check) => check.checkKey)).toEqual(expect.arrayContaining(["custom_evidence_1"]));
+      const customTask = run.evidenceTasks.find((task) => task.checkKey === "custom_evidence_1");
+      expect(customTask?.input).toMatchObject({
+        evidence_task: expect.objectContaining({
+          check_key: "custom_evidence_1",
+          target_files: ["verified.md"]
+        }),
+        instruction: "Read verified.md and confirm it exists and contains \"Run Tests successfully\"."
+      });
+    } finally {
+      await app.close();
+    }
   });
 
   it("rejects import batches without writing skills and disables risky imports without owner review", async () => {
@@ -864,6 +1212,100 @@ async function createCustomerOptOutCommand(workspace: string) {
   );
 }
 
+async function createRefundMoneyCommand(workspace: string) {
+  const commandDir = join(workspace, ".claude", "commands", "ecommerce");
+  await mkdir(commandDir, { recursive: true });
+  await writeFile(
+    join(commandDir, "refund-money.md"),
+    [
+      "---",
+      "name: refund-money",
+      "description: Refund customer money after approval.",
+      "allowed-tools:",
+      "  - Bash(echo:*)",
+      "owners: support-team",
+      "approver_roles: finance-owner",
+      "evidence_tasks:",
+      "  - check_key: customer_file_not_empty",
+      "    label: Customer file is present",
+      "    instructions: Read customer.md and confirm it exists and is not empty.",
+      "    success_criteria:",
+      "      - customer.md exists",
+      "      - customer.md has non-whitespace content",
+      "    allowed_actions:",
+      "      - read_file",
+      "    target_files:",
+      "      - customer.md",
+      "---",
+      "",
+      "Refund customer money after AgentGate approval."
+    ].join("\n"),
+    "utf8"
+  );
+  await writeFile(join(workspace, "customer.md"), "customer_id: cust_123\n", "utf8");
+}
+
+async function createRefundMoneyCommandWithAttachedEvidence(workspace: string) {
+  const commandDir = join(workspace, ".claude", "commands", "ecommerce");
+  await mkdir(commandDir, { recursive: true });
+  await writeFile(
+    join(commandDir, "refund-money.md"),
+    [
+      "---",
+      "name: refund-money",
+      "description: Refund customer money after approval.",
+      "allowed-tools:",
+      "  - Bash(echo:*)",
+      "owners: support-team",
+      "approver_roles: finance-owner",
+      "evidence_tasks:",
+      "  - check_key: customer_file_not_empty",
+      "    label: Customer file is present",
+      "    evidence_skill_id: verify-customer-file",
+      "---",
+      "",
+      "Refund customer money after AgentGate approval."
+    ].join("\n"),
+    "utf8"
+  );
+  await writeFile(join(workspace, "customer.md"), "customer_id: cust_123\n", "utf8");
+}
+
+async function createReusableCustomerEvidenceSkill(tenantId: string, workspaceId: string) {
+  await prisma.skill.create({
+    data: {
+      id: `skill_verify_customer_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      tenantId,
+      workspaceId,
+      skillId: "verify-customer-file",
+      name: "Verify Customer File",
+      category: "evidence",
+      defaultRiskLevel: "low",
+      versions: {
+        create: {
+          id: `skillver_verify_customer_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          tenantId,
+          workspaceId,
+          version: "1.0.0",
+          config: {
+            skill_type: "evidence",
+            side_effect_level: "read_only",
+            check_key: "customer_file_not_empty",
+            allowed_runtimes: ["codex_cli", "claude_code_mcp", "local_deterministic"],
+            preferred_runtimes: ["codex_cli", "local_deterministic"],
+            execution_snapshot: {
+              body: "Read customer.md and confirm it exists and is not empty."
+            }
+          },
+          execution: {
+            live_requires_execution_token: false
+          }
+        }
+      }
+    }
+  });
+}
+
 async function createEcommerceProdDeploymentCommand(workspace: string) {
   const commandDir = join(workspace, ".claude", "commands", "ecommerce");
   await mkdir(commandDir, { recursive: true });
@@ -958,6 +1400,7 @@ async function createMcpFixtures(workspace: string) {
 function workspaceIdForTenant(tenantId: string) {
   return `workspace_${tenantId}`;
 }
+
 
 async function markGateChecksPassed(runId: string) {
   await prisma.gateCheckResult.updateMany({

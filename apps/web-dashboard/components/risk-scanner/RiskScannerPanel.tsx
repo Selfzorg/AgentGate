@@ -273,6 +273,7 @@ export function RiskScannerPanel() {
             <label>
               <span className="text-xs font-semibold uppercase text-muted">Action</span>
               <input
+                suppressHydrationWarning
                 value={rawAction}
                 onChange={(event) => setRawAction(event.target.value)}
                 className="mt-1 h-9 w-full rounded-ui border border-border bg-background px-3 text-sm outline-none focus:border-accent"
@@ -303,6 +304,7 @@ export function RiskScannerPanel() {
             </Button>
           </div>
           <textarea
+            suppressHydrationWarning
             value={payloadText}
             onChange={(event) => setPayloadText(event.target.value)}
             spellCheck={false}

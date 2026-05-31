@@ -23,8 +23,8 @@ describe("Phase 6 demo productization", () => {
     const app = await createApp({ prisma, logger: false });
     const packageJson = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
     expect(packageJson.scripts).toMatchObject({
-      "demo:setup": "pnpm postgres:start && pnpm db:migrate && pnpm db:seed",
-      "demo:reset": "pnpm db:seed",
+      "demo:setup": "pnpm postgres:start && pnpm db:deploy && pnpm db:seed",
+      "demo:reset": "node scripts/demo-reset.mjs",
       "demo:run": "tsx scripts/run-demo-scenario.ts"
     });
 

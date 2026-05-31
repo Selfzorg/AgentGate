@@ -1,5 +1,6 @@
 import type { ResolvedSkill } from "@agentgate/core-types";
 import {
+  normalizeEvidenceTaskSpecs,
   resolveRegistryCandidate,
   type RegistryResolutionMatch,
   type SkillRegistryCandidate,
@@ -10,7 +11,7 @@ import {
   type SkillRegistrySourceType
 } from "@agentgate/skill-registry";
 import type { PrismaClient } from "@prisma/client";
-import { normalizeRequiredChecks } from "./imported-skill-governance";
+import { mergeRequiredChecks, normalizeRequiredChecks } from "./imported-skill-governance";
 
 export type ImportedRegistryResolution = {
   selected: (RegistryResolutionMatch & { skillVersionId: string; skillVersion: string; category: string }) | null;
@@ -69,6 +70,7 @@ export async function resolveImportedRegistrySkill(
       matched_field: selected.matchedField,
       policy_aliases: stringArray(configForCandidate(selected.candidate).policy_aliases),
       required_checks: normalizeRequiredChecks(configForCandidate(selected.candidate).required_checks),
+      evidence_tasks: normalizeEvidenceTaskSpecs(configForCandidate(selected.candidate).evidence_tasks).tasks,
       source_fingerprint: {
         source_type: selected.candidate.sourceType,
         path: selected.candidate.relativePath,
@@ -86,6 +88,54 @@ export async function resolveImportedRegistrySkill(
       alternatives,
       candidates
     }
+  };
+}
+
+export async function hydrateResolvedSkillFromActiveVersion(
+  prisma: PrismaClient,
+  input: {
+    tenantId: string;
+    workspaceId: string;
+    resolvedSkill: ResolvedSkill;
+  }
+): Promise<ResolvedSkill> {
+  const skill = await prisma.skill.findUnique({
+    where: {
+      tenantId_workspaceId_skillId: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        skillId: input.resolvedSkill.skill_id
+      }
+    },
+    include: {
+      versions: {
+        where: { status: "active" },
+        orderBy: { createdAt: "desc" },
+        take: 1
+      }
+    }
+  });
+
+  const activeVersion = skill?.versions[0];
+  if (!skill || !activeVersion) return input.resolvedSkill;
+
+  const config = recordFrom(activeVersion.config);
+  const activeRequiredChecks = normalizeRequiredChecks(config.required_checks);
+  const activeEvidenceTasks = normalizeEvidenceTaskSpecs(config.evidence_tasks).tasks;
+  const mergedEvidenceTasks = mergeEvidenceTasks(input.resolvedSkill.evidence_tasks ?? [], activeEvidenceTasks);
+  const policyAliases = mergeStringLists(input.resolvedSkill.policy_aliases ?? [], stringArray(config.policy_aliases));
+
+  if (activeRequiredChecks.length === 0 && activeEvidenceTasks.length === 0 && policyAliases.length === 0) {
+    return input.resolvedSkill;
+  }
+
+  return {
+    ...input.resolvedSkill,
+    skill_version: activeVersion.version,
+    required_checks: mergeRequiredChecks(input.resolvedSkill.required_checks ?? [], activeRequiredChecks),
+    evidence_tasks: mergedEvidenceTasks,
+    ...(policyAliases.length > 0 ? { policy_aliases: policyAliases } : {}),
+    resolver_reason: `${input.resolvedSkill.resolver_reason} Active skill version governance was applied.`
   };
 }
 
@@ -300,4 +350,15 @@ function tokensFor(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
     .filter(Boolean);
+}
+
+function mergeEvidenceTasks(current: ResolvedSkill["evidence_tasks"], active: ResolvedSkill["evidence_tasks"]) {
+  const tasks = new Map<string, NonNullable<ResolvedSkill["evidence_tasks"]>[number]>();
+  for (const task of current ?? []) tasks.set(task.check_key, task);
+  for (const task of active ?? []) tasks.set(task.check_key, task);
+  return [...tasks.values()];
+}
+
+function mergeStringLists(...groups: string[][]) {
+  return [...new Set(groups.flat().map((entry) => entry.trim()).filter(Boolean))];
 }

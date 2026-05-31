@@ -1,3 +1,4 @@
+import type { EvidenceTaskSpec } from "@agentgate/core-types";
 import { Prisma, type EvidenceTask, type GateCheckResult } from "@prisma/client";
 import { subagentForCheck } from "./evidence-runtimes";
 import {
@@ -16,9 +17,12 @@ export function evidenceTaskCreateData(input: {
   evidenceSkill: EvidenceSkillDefinition;
   selectedRuntime: EvidenceRuntimeId;
   requestedBy: string;
+  evidenceTaskSpec?: EvidenceTaskSpec | undefined;
+  extraInput?: Record<string, unknown> | undefined;
 }): Prisma.EvidenceTaskUncheckedCreateInput {
   const subagent = subagentForCheck(input.check.checkKey);
   const targetSkillId = input.run.skill?.skillId ?? resolvedSkillId(input.run.resolvedSkillSnapshot);
+  const attachedInstruction = instructionFromEvidenceSkill(input.evidenceSkill);
 
   return {
     id: createId("evtsk"),
@@ -43,9 +47,19 @@ export function evidenceTaskCreateData(input: {
       context: contextSummary(recordFrom(input.run.context)),
       target_skill_id: targetSkillId,
       evidence_skill: evidenceSkillSnapshot(input.evidenceSkill),
+      ...(input.evidenceTaskSpec ? { evidence_task: input.evidenceTaskSpec } : {}),
       subagent,
-      instruction: `Verify ${input.check.label} for the requested action. Execute only read-only evidence collection.`,
-      allowed_actions: ["read_files", "rg", "git_show", "safe_shell"],
+      instruction:
+        input.evidenceTaskSpec?.instructions ||
+        attachedInstruction ||
+        `Verify ${input.check.label} for the requested action. Execute only read-only evidence collection.`,
+      success_criteria: input.evidenceTaskSpec?.success_criteria ?? [],
+      allowed_actions:
+        input.evidenceTaskSpec && input.evidenceTaskSpec.allowed_actions.length > 0
+          ? input.evidenceTaskSpec.allowed_actions
+          : ["read_files", "rg", "git_show", "safe_shell"],
+      target_files: input.evidenceTaskSpec?.target_files ?? [],
+      ...(input.extraInput ?? {}),
       forbidden_actions: ["deploy", "merge", "write_files", "mutate_database", "call_production_systems"],
       expected_output_schema: {
         status: "passed | failed | missing",
@@ -101,13 +115,18 @@ export function evidenceSkillFromTask(task: EvidenceTask): EvidenceSkillDefiniti
     checkKey: stringFrom(evidenceSkill.check_key) ?? task.checkKey,
     skillId: stringFrom(evidenceSkill.skill_id) ?? task.evidenceSkillId,
     name: stringFrom(evidenceSkill.name) ?? task.evidenceSkillId,
+    description: stringFrom(evidenceSkill.description),
     version: stringFrom(evidenceSkill.version) ?? "unknown",
     connectorId: null,
     skillType: evidenceSkill.skill_type === "evidence" ? "evidence" : "execution",
-    sideEffectLevel: evidenceSkill.side_effect_level === "read_only" ? "read_only" : "mutating",
+    sideEffectLevel:
+      evidenceSkill.side_effect_level === "read_only" || evidenceSkill.side_effect_level === "simulated"
+        ? evidenceSkill.side_effect_level
+        : "mutating",
     allowedRuntimes: runtimeListFrom(evidenceSkill.allowed_runtimes),
     preferredRuntimes: runtimeListFrom(evidenceSkill.preferred_runtimes),
-    registrySource: evidenceSkill.registry_source === "database" ? "database" : "built_in_fallback"
+    registrySource: evidenceSkill.registry_source === "database" ? "database" : "built_in_fallback",
+    executionSnapshot: recordFrom(evidenceSkill.execution_snapshot)
   };
 }
 
@@ -133,14 +152,23 @@ export function evidenceSkillSnapshot(skill: EvidenceSkillDefinition) {
   return {
     skill_id: skill.skillId,
     name: skill.name,
+    description: skill.description ?? null,
     version: skill.version,
     check_key: skill.checkKey,
     skill_type: skill.skillType,
     side_effect_level: skill.sideEffectLevel,
     registry_source: skill.registrySource,
     allowed_runtimes: skill.allowedRuntimes,
-    preferred_runtimes: skill.preferredRuntimes
+    preferred_runtimes: skill.preferredRuntimes,
+    ...(skill.executionSnapshot ? { execution_snapshot: skill.executionSnapshot } : {})
   };
+}
+
+function instructionFromEvidenceSkill(skill: EvidenceSkillDefinition) {
+  const snapshot = recordFrom(skill.executionSnapshot);
+  const body = stringFrom(snapshot.body);
+  const entrypointContent = stringFrom(snapshot.entrypoint_content);
+  return body ?? entrypointContent ?? skill.description ?? null;
 }
 
 function runtimeListFrom(value: unknown): EvidenceRuntimeId[] {

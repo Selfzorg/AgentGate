@@ -1,6 +1,6 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { localDeterministicFallbackResult, runAgentEvidence } from "./agent-runtime";
+import { localDeterministicFallbackForMissingResult, localDeterministicFallbackResult, runAgentEvidence } from "./agent-runtime";
 import { normalizeAgentResult } from "./prompt";
 import { redactValue } from "./redaction";
 import type { ClaudeEvidenceWorkerConfig, EvidenceTask, WorkerDeps, WorkerStatus } from "./types";
@@ -55,14 +55,22 @@ export async function processEvidenceTask(task: EvidenceTask, config: ClaudeEvid
       `Evidence agent timed out after ${config.agentTimeoutMs}ms.`
     );
     const normalized = normalizeAgentResult(agentResult);
+    const fallback = localDeterministicFallbackForMissingResult(claimedTask, config, normalized);
     heartbeat.stop();
-    await completeEvidenceTask(claimedTask.id, normalized, config, deps);
+    await completeEvidenceTask(claimedTask.id, fallback ?? normalized, config, deps);
     await log(config, deps, {
-      event: "task.completed",
+      event: fallback ? "task.fallback_completed" : "task.completed",
       task_id: claimedTask.id,
       check_key: claimedTask.check_key,
-      evidence_status: normalized.status,
-      reason: normalized.reason
+      ...(fallback
+        ? {
+            fallback_runtime: "local_deterministic",
+            original_runtime: config.runtime,
+            original_reason: normalized.reason
+          }
+        : {}),
+      evidence_status: (fallback ?? normalized).status,
+      reason: (fallback ?? normalized).reason
     });
     await safeRecordWorkerHeartbeat("idle", config, deps, {
       processedDelta: 1

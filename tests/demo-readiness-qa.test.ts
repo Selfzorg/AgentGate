@@ -354,7 +354,7 @@ describe("home demo readiness QA", () => {
 
     const aiComponentUsages = aiCardReferences
       .filter(({ content }) => content.includes("<AiInsightsEngine"))
-      .map(({ file }) => file.replace(process.cwd(), ""));
+      .map(({ file }) => file.replace(process.cwd(), "").replaceAll("\\", "/"));
     expect(aiComponentUsages).toEqual(["/apps/web-dashboard/app/skill-runs/[runId]/page.tsx"]);
   });
 

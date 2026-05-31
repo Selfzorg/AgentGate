@@ -7,6 +7,7 @@ import { z } from "zod";
 import { approveRequest } from "../services/approval-service";
 import { createDecisionService, type DecisionServiceResult } from "../services/decision-service";
 import { runDryRun } from "../services/dry-run-service";
+import { processEvidenceTasksOnce } from "../services/evidence-task-service";
 import { queueSkillRunExecution } from "../services/execution-service";
 import { issueExecutionToken } from "../services/execution-token-service";
 import { runDemoScenario, type DemoScenarioId } from "../services/demo-scenario-service";
@@ -116,6 +117,12 @@ export const registerDemoRoutes: FastifyPluginAsync = async (app) => {
       configDir
     });
     executions.push({ action_id: "production_db_migration", step: "dry_run", result: dryRun.body });
+    await processEvidenceTasksOnce({
+      prisma: app.services.prisma,
+      skillRunId: migrationDecision.run_id,
+      limit: 50,
+      agentId: "scenario_dry_run_evidence_worker"
+    });
 
     const migrationApproval = await app.services.prisma.approvalRequest.findUniqueOrThrow({
       where: { skillRunId: migrationDecision.run_id }

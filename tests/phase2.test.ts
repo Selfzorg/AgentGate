@@ -120,6 +120,24 @@ describe("Phase 2 approvals and dry-runs", () => {
     const decision = await replay("production_db_migration");
     const app = await createApp({ prisma, logger: false });
 
+    const approvalSearchBeforeDryRun = await app.inject({
+      method: "GET",
+      url: `/api/v1/approvals?q=${encodeURIComponent(decision.run_id)}`
+    });
+    expect(approvalSearchBeforeDryRun.statusCode).toBe(200);
+    expect(approvalSearchBeforeDryRun.json()).toMatchObject({
+      approvals: [],
+      related_runs: [
+        {
+          id: decision.run_id,
+          trace_id: decision.trace_id,
+          decision: "FORCE_DRY_RUN",
+          status: "dry_run_required",
+          dry_run_result: null
+        }
+      ]
+    });
+
     const dryRun = await app.inject({
       method: "POST",
       url: `/api/v1/skill-runs/${decision.run_id}/dry-run`
@@ -128,10 +146,15 @@ describe("Phase 2 approvals and dry-runs", () => {
     expect(dryRun.json()).toMatchObject({
       decision: "REQUIRE_APPROVAL",
       dry_run_result: {
-        status: "completed"
+        status: "completed",
+        result: {
+          connector: "db-demo-connector",
+          required_checks: ["dry_run_completed", "schema_diff_generated", "backup_exists"]
+        }
       },
-      missing_checks: []
+      missing_checks: ["backup_exists", "dry_run_completed", "schema_diff_generated"]
     });
+    expect(dryRun.json().evidence_tasks).toHaveLength(3);
 
     const run = await prisma.skillRun.findUniqueOrThrow({
       where: { id: decision.run_id },
@@ -143,9 +166,49 @@ describe("Phase 2 approvals and dry-runs", () => {
     });
 
     expect(run.dryRunResult?.summary).toContain("Schema diff generated");
-    expect(run.gateCheckResults.every((check) => check.status === "passed")).toBe(true);
+    expect(run.dryRunResult?.artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "schema_diff" }),
+        expect.objectContaining({ type: "database_backup" })
+      ])
+    );
+    expect(run.gateCheckResults.every((check) => check.status === "running")).toBe(true);
     expect(run.approvalRequest?.status).toBe("pending");
-    expect(run.approvalRequest?.approvalReadiness).toBe("ready");
+    expect(run.approvalRequest?.approvalReadiness).toBe("collecting");
+
+    const dryRunEvidenceTask = await prisma.evidenceTask.findFirstOrThrow({
+      where: {
+        skillRunId: decision.run_id,
+        checkKey: "schema_diff_generated"
+      }
+    });
+    expect(dryRunEvidenceTask.input).toMatchObject({
+      dry_run_result: {
+        id: run.dryRunResult?.id,
+        status: "completed",
+        artifacts: expect.arrayContaining([expect.objectContaining({ type: "schema_diff" })])
+      }
+    });
+
+    await processEvidenceForRun(decision.run_id);
+    const verifiedRun = await prisma.skillRun.findUniqueOrThrow({
+      where: { id: decision.run_id },
+      include: {
+        gateCheckResults: true,
+        approvalRequest: true
+      }
+    });
+    expect(verifiedRun.gateCheckResults.every((check) => check.status === "passed")).toBe(true);
+    expect(verifiedRun.approvalRequest?.approvalReadiness).toBe("ready");
+
+    const approvalSearchAfterDryRun = await app.inject({
+      method: "GET",
+      url: `/api/v1/approvals?q=${encodeURIComponent(decision.run_id)}`
+    });
+    expect(approvalSearchAfterDryRun.statusCode).toBe(200);
+    const searchAfterBody = approvalSearchAfterDryRun.json();
+    expect(searchAfterBody.approvals.map((approval: { skill_run: { id: string } }) => approval.skill_run.id)).toContain(decision.run_id);
+    expect(searchAfterBody.related_runs).toEqual([]);
 
     await app.close();
   });
@@ -159,6 +222,7 @@ describe("Phase 2 approvals and dry-runs", () => {
       url: `/api/v1/skill-runs/${decision.run_id}/dry-run`
     });
     expect(dryRun.statusCode).toBe(200);
+    await processEvidenceForRun(decision.run_id);
 
     const approval = await prisma.approvalRequest.findUniqueOrThrow({
       where: { skillRunId: decision.run_id }
@@ -182,6 +246,108 @@ describe("Phase 2 approvals and dry-runs", () => {
       url: `/api/v1/skill-runs/${decision.run_id}/dry-run`
     });
     expect(directDryRun.statusCode).toBe(409);
+
+    await app.close();
+  });
+
+  it("rejects dry-run for skills that do not declare dry-run support", async () => {
+    const decision = await replay("production_deploy");
+    const app = await createApp({ prisma, logger: false });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/skill-runs/${decision.run_id}/dry-run`
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Skill does not support dry-run",
+      skill_id: "deploy-production"
+    });
+
+    await app.close();
+  });
+
+  it("supports generic dry-run skills through their connector instead of a hardcoded migration branch", async () => {
+    const suffix = Date.now().toString(36);
+    const skill = await prisma.skill.create({
+      data: {
+        id: `skill_generic_dry_${suffix}`,
+        tenantId: "tenant_demo",
+        workspaceId: "workspace_demo",
+        skillId: `generic-dry-run-${suffix}`,
+        name: "Generic Dry Run",
+        category: "source_control",
+        defaultRiskLevel: "low",
+        description: "Generic dry-run-capable skill"
+      }
+    });
+    await prisma.skillVersion.create({
+      data: {
+        id: `skillver_generic_dry_${suffix}`,
+        tenantId: "tenant_demo",
+        workspaceId: "workspace_demo",
+        skillRecordId: skill.id,
+        connectorId: "connector_github_demo",
+        version: "1.0.0",
+        status: "active",
+        config: {
+          supports_dry_run: true
+        },
+        execution: {}
+      }
+    });
+    const runId = `run_generic_dry_${suffix}`;
+    await prisma.skillRun.create({
+      data: {
+        id: runId,
+        tenantId: "tenant_demo",
+        workspaceId: "workspace_demo",
+        traceId: `trc_generic_dry_${suffix}`,
+        skillRecordId: skill.id,
+        source: "demo_harness",
+        adapterType: "simulator",
+        rawAction: "generic dry-run action",
+        environment: "production",
+        mode: "enforce",
+        decision: "FORCE_DRY_RUN",
+        riskLevel: "low",
+        riskScore: 10,
+        riskReasons: [],
+        context: {},
+        status: "dry_run_required",
+        reason: "Generic dry-run required.",
+        resolvedSkillSnapshot: {
+          skill_id: skill.skillId,
+          skill_version: "1.0.0",
+          category: "source_control",
+          default_risk_level: "low",
+          confidence: 1,
+          resolver_reason: "test",
+          supports_dry_run: true
+        },
+        policySnapshot: {}
+      }
+    });
+    const app = await createApp({ prisma, logger: false });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/skill-runs/${runId}/dry-run`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      decision: "ALLOW",
+      dry_run_result: {
+        status: "completed",
+        summary: "GitHub demo dry-run placeholder.",
+        result: {
+          connector: "github-demo-connector",
+          skill_id: skill.skillId
+        }
+      }
+    });
 
     await app.close();
   });

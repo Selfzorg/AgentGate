@@ -14,8 +14,12 @@ export type ExecutionContext = {
 };
 
 export type DryRunResult = {
+  status?: "completed" | "failed";
   summary: string;
   artifacts: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  context_updates?: Record<string, unknown>;
+  required_checks?: string[];
 };
 
 export type ExecutionResult = {
