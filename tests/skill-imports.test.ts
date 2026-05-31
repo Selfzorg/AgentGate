@@ -759,6 +759,164 @@ describe("AgentGate skill import recovery scope", () => {
     });
   });
 
+  it("prefers an exact requested_skill over a shorter same-confidence registry match", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createRefundMoneyCommand(workspace);
+      await createSourceCommandRefundMoneySkill(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["service_owner"],
+            approver_roles: ["service_owner"]
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const decision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            source: "mcp_proxy",
+            adapter_type: "mcp_proxy",
+            agent: {
+              agent_id: "mcp_refund_source_command_test",
+              agent_type: "mcp_proxy",
+              role: "release_agent"
+            },
+            tool: {
+              tool_name: "agentgate_govern_action"
+            },
+            raw_action: "trigger ecommerce-refund-money",
+            context: {
+              environment: "production",
+              requested_skill: "source-command-ecommerce-refund-money",
+              requested_skill_name: "ecommerce-refund-money"
+            }
+          }
+        });
+        expect(decision.statusCode).toBe(200);
+        expect(decision.json()).toMatchObject({
+          decision: "REQUIRE_APPROVAL",
+          skill_id: "codex_skill:repo:agents-skills-source-command-ecommerce-refund-money",
+          missing_checks: ["custom_evidence_1"]
+        });
+
+        const run = await prisma.skillRun.findUniqueOrThrow({
+          where: { id: decision.json().run_id },
+          include: { gateCheckResults: true }
+        });
+        expect(run.resolvedSkillSnapshot).toMatchObject({
+          resolver_source: "imported_registry",
+          matched_field: "name",
+          source_fingerprint: {
+            source_type: "codex_skill",
+            path: ".agents/skills/source-command-ecommerce-refund-money/SKILL.md"
+          }
+        });
+        expect(run.gateCheckResults.map((check) => check.checkKey)).toEqual(["custom_evidence_1"]);
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  it("maps short source-command requested_skill aliases to imported source-command skills", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createCustomerOptOutCommand(workspace);
+      await createSourceCommandCustomerOptOutSkill(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["privacy-team"],
+            approver_roles: ["privacy-owner"]
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const decision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            source: "mcp_proxy",
+            adapter_type: "mcp_proxy",
+            agent: {
+              agent_id: "mcp_customer_opt_out_source_command_test",
+              agent_type: "mcp_proxy",
+              role: "privacy_agent"
+            },
+            tool: {
+              tool_name: "agentgate_govern_action"
+            },
+            raw_action: "trigger ecommerce-customer-opt-out",
+            context: {
+              environment: "production",
+              requested_skill: "ecommerce-customer-opt-out",
+              user_intent: "Trigger the ecommerce customer opt-out process"
+            }
+          }
+        });
+        expect(decision.statusCode).toBe(200);
+        expect(decision.json()).toMatchObject({
+          decision: "REQUIRE_APPROVAL",
+          skill_id: "codex_skill:repo:agents-skills-source-command-ecommerce-customer-opt-out",
+          missing_checks: ["custom_evidence_10"]
+        });
+
+        const run = await prisma.skillRun.findUniqueOrThrow({
+          where: { id: decision.json().run_id },
+          include: { gateCheckResults: true }
+        });
+        expect(run.resolvedSkillSnapshot).toMatchObject({
+          resolver_source: "imported_registry",
+          matched_field: "name",
+          source_fingerprint: {
+            source_type: "codex_skill",
+            path: ".agents/skills/source-command-ecommerce-customer-opt-out/SKILL.md"
+          }
+        });
+        expect(run.gateCheckResults.map((check) => check.checkKey)).toEqual(["custom_evidence_10"]);
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
   it("attaches reusable read-only evidence skills without repeating task instructions", async () => {
     await withTempWorkspace(async (workspace) => {
       await createRefundMoneyCommandWithAttachedEvidence(workspace);
@@ -1612,6 +1770,74 @@ async function createRefundMoneyCommand(workspace: string) {
     "utf8"
   );
   await writeFile(join(workspace, "customer.md"), "customer_id: cust_123\n", "utf8");
+}
+
+async function createSourceCommandRefundMoneySkill(workspace: string) {
+  const skillDir = join(workspace, ".agents", "skills", "source-command-ecommerce-refund-money");
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(
+    join(skillDir, "SKILL.md"),
+    [
+      "---",
+      "name: source-command-ecommerce-refund-money",
+      "description: Process financial refunds for merchant/customer orders in staging and production environments.",
+      "evidence_tasks:",
+      "  - check_key: custom_evidence_1",
+      "    label: Custom evidence 1",
+      "    instructions: Read consent.md and confirm it exists and is not empty.",
+      "    allowed_actions:",
+      "      - read_file",
+      "    target_files:",
+      "      - consent.md",
+      "---",
+      "",
+      "# source-command-ecommerce-refund-money",
+      "",
+      "Use this skill when the user asks to run the migrated source command `ecommerce-refund-money`.",
+      "",
+      "```bash",
+      "echo \"This refund-money got executed\" >> ecommerce_operations.log",
+      "```"
+    ].join("\n"),
+    "utf8"
+  );
+  await writeFile(join(workspace, "consent.md"), "consent given\n", "utf8");
+}
+
+async function createSourceCommandCustomerOptOutSkill(workspace: string) {
+  const skillDir = join(workspace, ".agents", "skills", "source-command-ecommerce-customer-opt-out");
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(
+    join(skillDir, "SKILL.md"),
+    [
+      "---",
+      "name: source-command-ecommerce-customer-opt-out",
+      "description: Handle consumer privacy request to opt out and erase personal information under GDPR/CCPA.",
+      "owners:",
+      "  - privacy-team",
+      "approver_roles:",
+      "  - privacy-owner",
+      "evidence_tasks:",
+      "  - check_key: custom_evidence_10",
+      "    label: Custom evidence 10",
+      "    instructions: If consent.md file is not empty return passed, else failed",
+      "    allowed_actions:",
+      "      - read_file",
+      "    target_files:",
+      "      - consent.md",
+      "---",
+      "",
+      "# source-command-ecommerce-customer-opt-out",
+      "",
+      "Use this skill when the user asks to run the migrated source command `ecommerce-customer-opt-out`.",
+      "",
+      "```bash",
+      "echo \"This customer-opt-out got executed\" >> ecommerce_operations.log",
+      "```"
+    ].join("\n"),
+    "utf8"
+  );
+  await writeFile(join(workspace, "consent.md"), "consent given\n", "utf8");
 }
 
 async function createRefundMoneyCommandWithAttachedEvidence(workspace: string) {

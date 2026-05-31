@@ -634,6 +634,25 @@ describe("Claude evidence worker", () => {
       reason: "verified.md contains the expected text.",
       evidence: { file: "verified.md" }
     });
+
+    const claudeStructuredOutput = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "",
+      structured_output: {
+        status: "passed",
+        reason: "consent.md exists and is not empty.",
+        evidence: {
+          file: "consent.md"
+        }
+      }
+    });
+    expect(parseAgentOutput(claudeStructuredOutput)).toEqual({
+      status: "passed",
+      reason: "consent.md exists and is not empty.",
+      evidence: { file: "consent.md" }
+    });
   });
 
   it("builds a read-only prompt with forbidden side effects", () => {

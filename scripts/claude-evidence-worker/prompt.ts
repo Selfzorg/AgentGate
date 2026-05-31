@@ -32,6 +32,8 @@ export function parseAgentOutput(output: string): AgentEvidenceResult {
   const parsed = parseJsonLoose(trimmed);
   const candidates = [
     parsed,
+    recordFrom(parsed).structured_output,
+    recordFrom(parsed).structuredOutput,
     recordFrom(parsed).result,
     recordFrom(parsed).content,
     recordFrom(parsed).message,
@@ -39,7 +41,15 @@ export function parseAgentOutput(output: string): AgentEvidenceResult {
   ];
 
   for (const candidate of candidates) {
-    const resolved = typeof candidate === "string" ? parseJsonLoose(candidate) : candidate;
+    let resolved = candidate;
+    if (typeof candidate === "string") {
+      if (candidate.trim().length === 0) continue;
+      try {
+        resolved = parseJsonLoose(candidate);
+      } catch {
+        continue;
+      }
+    }
     const normalized = tryNormalizeAgentResult(resolved);
     if (normalized) return normalized;
   }

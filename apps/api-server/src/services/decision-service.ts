@@ -2,7 +2,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NormalizedActionRequest } from "@agentgate/core-types";
 import { loadDemoFixtures } from "@agentgate/config-loader";
-import { evaluatePolicy } from "@agentgate/policy-engine";
+import { evaluatePolicy, type PolicyEvaluationResult } from "@agentgate/policy-engine";
 import { scoreRisk } from "@agentgate/risk-engine";
 import { resolveSkill } from "@agentgate/skill-resolver";
 import { Prisma, type PrismaClient } from "@prisma/client";
@@ -96,11 +96,14 @@ export function createDecisionService({
         ? resolvedSkill.evidence_tasks.map((task) => task.check_key)
         : [];
       const skillRequiredChecks = mergeRequiredChecks(importedRequiredChecks, importedEvidenceTaskChecks);
-      const requiredChecks = mergeRequiredChecks(policy.required_checks, skillRequiredChecks);
+      const governancePolicy = requireApprovalForImportedEvidence(policy, skillRequiredChecks);
+      const requiredChecks = mergeRequiredChecks(governancePolicy.required_checks, skillRequiredChecks);
       const mode = governanceModeFromContext(request.context);
-      const effectiveDecision = mode === "enforce" ? policy.decision : "ALLOW";
+      const effectiveDecision = mode === "enforce" ? governancePolicy.decision : "ALLOW";
       const effectiveReason =
-        mode === "enforce" ? policy.reason : `${mode} mode observed policy decision ${policy.decision}: ${policy.reason}`;
+        mode === "enforce"
+          ? governancePolicy.reason
+          : `${mode} mode observed policy decision ${governancePolicy.decision}: ${governancePolicy.reason}`;
 
       const [agent, skill, matchedPolicy] = await Promise.all([
         prisma.agent.findUnique({
@@ -134,7 +137,7 @@ export function createDecisionService({
           : Promise.resolve(null)
       ]);
 
-      const shouldCollectEvidence = mode === "enforce" && policy.decision === "REQUIRE_APPROVAL" && requiredChecks.length > 0;
+      const shouldCollectEvidence = mode === "enforce" && governancePolicy.decision === "REQUIRE_APPROVAL" && requiredChecks.length > 0;
       const missingChecks = shouldCollectEvidence ? requiredChecks : missingChecksForRequest(requiredChecks, request.context);
       const status = statusForDecision(effectiveDecision);
 
@@ -158,16 +161,17 @@ export function createDecisionService({
           reason: effectiveReason,
           resolvedSkillSnapshot: resolvedSkill as Prisma.InputJsonValue,
           policySnapshot: {
-            matched_policy_id: policy.matched_policy?.policy_id ?? null,
+            matched_policy_id: governancePolicy.matched_policy?.policy_id ?? null,
             reason: effectiveReason,
-            policy_decision: policy.decision,
+            policy_decision: governancePolicy.decision,
+            ...(governancePolicy.decision !== policy.decision ? { base_policy_decision: policy.decision } : {}),
             decision: effectiveDecision,
             mode,
-            policy_required_checks: policy.required_checks,
+            policy_required_checks: governancePolicy.required_checks,
             imported_required_checks: skillRequiredChecks,
             imported_evidence_tasks: resolvedSkill.evidence_tasks ?? [],
             required_checks: requiredChecks,
-            approvers: policy.approvers,
+            approvers: governancePolicy.approvers,
             missing_checks: missingChecks,
             rules_source: policyRules === fixtures.policies.rules ? "fixture_fallback" : "database"
           } as Prisma.InputJsonValue
@@ -195,7 +199,7 @@ export function createDecisionService({
           });
         }
 
-        if (mode === "enforce" && policy.decision === "REQUIRE_APPROVAL") {
+        if (mode === "enforce" && governancePolicy.decision === "REQUIRE_APPROVAL") {
           await createOrUpdateApprovalRequest(tx, {
             tenantId: request.tenant_id,
             workspaceId: request.workspace_id,
@@ -203,12 +207,12 @@ export function createDecisionService({
             traceId,
             riskLevel: risk.risk_level,
             missingChecks,
-            requiredApprovers: policy.approvers,
+            requiredApprovers: governancePolicy.approvers,
             approvalReadiness: shouldCollectEvidence ? "collecting" : undefined,
             evidence: {
-              policy: policy.matched_policy?.policy_id ?? null,
+              policy: governancePolicy.matched_policy?.policy_id ?? null,
               reason: effectiveReason,
-              policy_required_checks: policy.required_checks,
+              policy_required_checks: governancePolicy.required_checks,
               imported_required_checks: skillRequiredChecks,
               imported_evidence_tasks: resolvedSkill.evidence_tasks ?? [],
               required_checks: requiredChecks,
@@ -227,10 +231,11 @@ export function createDecisionService({
           risk_score: risk.risk_score,
           risk_level: risk.risk_level,
           decision: effectiveDecision,
-          policy_decision: policy.decision,
+          policy_decision: governancePolicy.decision,
+          ...(governancePolicy.decision !== policy.decision ? { base_policy_decision: policy.decision } : {}),
           mode,
           reason: effectiveReason,
-          policy_matched: policy.matched_policy?.policy_id ?? null,
+          policy_matched: governancePolicy.matched_policy?.policy_id ?? null,
           missing_checks: missingChecks
         };
 
@@ -260,7 +265,7 @@ export function createDecisionService({
                   })
                 ]
               : []),
-            ...(mode === "enforce" && policy.decision === "REQUIRE_APPROVAL"
+            ...(mode === "enforce" && governancePolicy.decision === "REQUIRE_APPROVAL"
               ? [
                   auditEventData(request, runId, traceId, requiredChecks.length > 0 ? 6 : 5, "approval.requested", {
                     ...auditMetadataBase,
@@ -295,11 +300,27 @@ export function createDecisionService({
         trace_id: traceId,
         run_id: runId,
         mode,
-        ...(effectiveDecision !== policy.decision ? { policy_decision: policy.decision } : {}),
+        ...(effectiveDecision !== governancePolicy.decision ? { policy_decision: governancePolicy.decision } : {}),
         ...(effectiveDecision === "FORCE_DRY_RUN" ? { dry_run_required: true } : {}),
         ...(finalMissingChecks.length > 0 ? { missing_checks: finalMissingChecks } : {})
       };
     }
+  };
+}
+
+function requireApprovalForImportedEvidence(
+  policy: PolicyEvaluationResult,
+  skillRequiredChecks: string[]
+): PolicyEvaluationResult {
+  if (policy.decision !== "ALLOW" || skillRequiredChecks.length === 0) return policy;
+
+  return {
+    ...policy,
+    decision: "REQUIRE_APPROVAL",
+    reason: policy.matched_policy
+      ? `Policy ${policy.matched_policy.policy_id} allowed the action, but imported skill evidence is required before execution.`
+      : "Imported skill evidence is required before execution.",
+    approvers: policy.approvers.length > 0 ? policy.approvers : ["service_owner"]
   };
 }
 

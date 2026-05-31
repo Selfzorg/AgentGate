@@ -38,10 +38,15 @@ export async function resolveImportedRegistrySkill(
     toolName: input.toolName
   });
   const explicitRegistryHint = hasRegistryHint(input.context);
-  const selected = resolution.selected && isResolutionAllowedForSource(resolution.selected, input.source, explicitRegistryHint, input.context)
-    ? withVersionMetadata(resolution.selected, candidates)
-    : null;
+  const exactHintMatch = exactRequestedSkillMatch(candidates, input.context, input.source);
+  const selectedMatch =
+    exactHintMatch ??
+    (resolution.selected && isResolutionAllowedForSource(resolution.selected, input.source, explicitRegistryHint, input.context)
+      ? resolution.selected
+      : null);
+  const selected = selectedMatch ? withVersionMetadata(selectedMatch, candidates) : null;
   const alternatives = resolution.alternatives.flatMap((match) => {
+    if (selectedMatch && match.candidate.id === selectedMatch.candidate.id) return [];
     if (!isResolutionAllowedForSource(match, input.source, explicitRegistryHint, input.context)) return [];
     const enriched = withVersionMetadata(match, candidates);
     return enriched ? [enriched] : [];
@@ -342,6 +347,117 @@ function registryHintFromContext(context: Record<string, unknown> | undefined) {
 
 function hasRegistryHint(context: Record<string, unknown> | undefined) {
   return Boolean(registryHintFromContext(context));
+}
+
+function exactRequestedSkillMatch(
+  candidates: SkillRegistryCandidate[],
+  context: Record<string, unknown> | undefined,
+  source: string | undefined
+): RegistryResolutionMatch | null {
+  const hints: Array<{ value: string | null; fields: Array<RegistryResolutionMatch["matchedField"]> }> = [
+    { value: stringFrom(context?.requested_skill_id), fields: ["skill_id", "name", "path"] },
+    { value: stringFrom(context?.requested_skill), fields: ["skill_id", "name", "path"] },
+    { value: stringFrom(context?.requested_skill_name), fields: ["name", "path"] }
+  ];
+
+  for (const hint of hints) {
+    if (!hint.value) continue;
+    const normalizedHint = normalizeIdentity(hint.value);
+    if (!normalizedHint) continue;
+
+    const matches = candidates.flatMap((candidate) => {
+      const matchedField = exactMatchedField(candidate, normalizedHint, hint.fields);
+      if (!matchedField) return [];
+      const match: RegistryResolutionMatch = {
+        candidate,
+        confidence: 1,
+        matchedField
+      };
+      return isResolutionAllowedForSource(match, source, true, context) ? [match] : [];
+    });
+
+    if (matches.length > 0) {
+      return matches.sort(compareExactMatches)[0] ?? null;
+    }
+  }
+
+  return null;
+}
+
+function exactMatchedField(
+  candidate: SkillRegistryCandidate,
+  normalizedHint: string,
+  fields: Array<RegistryResolutionMatch["matchedField"]>
+): RegistryResolutionMatch["matchedField"] | null {
+  if (fields.includes("skill_id") && exactIdentityValues(candidate, "skill_id").includes(normalizedHint)) return "skill_id";
+  if (fields.includes("name") && exactIdentityValues(candidate, "name").includes(normalizedHint)) return "name";
+  if (fields.includes("path") && exactIdentityValues(candidate, "path").includes(normalizedHint)) return "path";
+  return null;
+}
+
+function exactIdentityValues(candidate: SkillRegistryCandidate, field: RegistryResolutionMatch["matchedField"]): string[] {
+  if (field === "skill_id") {
+    return identityVariants([candidate.skillId, stripRegistryPrefix(candidate.skillId)], { includeSourceCommandAliases: false });
+  }
+  if (field === "name") return identityVariants([candidate.name]);
+  if (field !== "path") return [];
+
+  return identityVariants([
+    candidate.relativePath,
+    candidate.relativePath.replace(/\/?SKILL\.md$/i, "").replace(/\.md$/i, ""),
+    pathTail(candidate.relativePath),
+    pathTailWithParent(candidate.relativePath)
+  ]);
+}
+
+function compareExactMatches(left: RegistryResolutionMatch, right: RegistryResolutionMatch) {
+  return fieldRank(left.matchedField) - fieldRank(right.matchedField) || left.candidate.skillId.localeCompare(right.candidate.skillId);
+}
+
+function fieldRank(field: RegistryResolutionMatch["matchedField"]) {
+  if (field === "skill_id") return 0;
+  if (field === "name") return 1;
+  if (field === "path") return 2;
+  if (field === "declared_tool") return 3;
+  return 4;
+}
+
+function stripRegistryPrefix(skillId: string) {
+  return skillId.replace(/^(codex_skill|claude_skill|claude_command|claude_subagent|mcp_tool|native_connector):(repo|user):/i, "");
+}
+
+function identityVariants(values: string[], options: { includeSourceCommandAliases?: boolean } = {}) {
+  const normalized = uniqueStrings(values.map((value) => normalizeIdentity(value)));
+  if (options.includeSourceCommandAliases === false) return normalized;
+  return uniqueStrings(normalized.flatMap((value) => [value, sourceCommandAlias(value)]));
+}
+
+function sourceCommandAlias(value: string) {
+  if (value.startsWith("source-command-")) return value.slice("source-command-".length);
+  const nestedMatch = value.match(/(?:^|-)source-command-(.+)$/);
+  return nestedMatch?.[1] ?? value;
+}
+
+function pathTail(relativePath: string) {
+  const cleaned = relativePath.replaceAll("\\", "/").replace(/\/?SKILL\.md$/i, "").replace(/\.md$/i, "");
+  return cleaned.split("/").filter(Boolean).at(-1) ?? cleaned;
+}
+
+function pathTailWithParent(relativePath: string) {
+  const cleaned = relativePath.replaceAll("\\", "/").replace(/\/?SKILL\.md$/i, "").replace(/\.md$/i, "");
+  const segments = cleaned.split("/").filter(Boolean);
+  return segments.slice(-2).join("-");
+}
+
+function normalizeIdentity(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function tokensFor(value: string) {
