@@ -77,6 +77,13 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
   });
 
   try {
+    await appendLogAndAudit(prisma, run, "info", "Runner claimed execution attempt.", {
+      attempt_id: attempt?.id ?? null,
+      runner_id: "in_process_runner",
+      connector: connectorName,
+      skill_id: skillId
+    });
+
     const controls = validateExecutionControls({
       skillId,
       connectorName,
@@ -91,11 +98,24 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
       }, connectorName);
     }
 
+    await appendLogAndAudit(prisma, run, "info", "Execution controls validated.", {
+      connector: connectorName,
+      skill_id: skillId,
+      environment: run.environment,
+      token_status: token ? "used" : "not_required",
+      scopes
+    });
+
     for (const log of plannedLogs(run.rawAction, skillId, connectorName, scopes)) {
       await appendLogAndAudit(prisma, run, log.level, log.message, log.metadata);
     }
 
     const connector = connectorForRun(run.resolvedSkillSnapshot, skillId, connectorName);
+    await appendLogAndAudit(prisma, run, "info", "Connector selected.", {
+      connector: connectorName,
+      skill_id: skillId
+    });
+
     const input = skillInputForRun(run, skillId);
     const validation = await connector.validateInputs(input);
 
@@ -106,6 +126,11 @@ export async function executeSkillRun(prisma: PrismaClient, runId: string) {
         metadata: { errors: validation.errors }
       }, connectorName);
     }
+
+    await appendLogAndAudit(prisma, run, "info", "Connector input validation passed.", {
+      connector: connectorName,
+      skill_id: skillId
+    });
 
     const result = await connector.execute(input, {
       skill_run_id: run.id,

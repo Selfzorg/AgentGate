@@ -49,6 +49,7 @@ export function SkillsRegistry() {
   const [includeUserScopes, setIncludeUserScopes] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("all");
   const [riskFilter, setRiskFilter] = useState("all");
+  const [skillSearch, setSkillSearch] = useState("");
   const [warningOnly, setWarningOnly] = useState(false);
   const [owners, setOwners] = useState("service_owner");
   const [approverRoles, setApproverRoles] = useState("service_owner");
@@ -124,6 +125,11 @@ export function SkillsRegistry() {
       .filter(Boolean);
     return [...new Set(targets)].sort();
   }, [policies]);
+  const filteredSkills = useMemo(() => {
+    const query = skillSearch.trim().toLowerCase();
+    if (!query) return skills;
+    return skills.filter((skill) => skillSearchText(skill).includes(query));
+  }, [skillSearch, skills]);
   const selectedCount = selectedCandidateIds.length;
   const importStage = batch
     ? batch.status === "approved"
@@ -578,11 +584,35 @@ export function SkillsRegistry() {
 
       <section className="overflow-hidden rounded-ui border border-border bg-surface shadow-panel">
         <div className="border-b border-border p-5">
-          <h2 className="text-base font-semibold">Skill Registry</h2>
-          <p className="mt-1 text-sm text-muted">{skills.length} active or imported records returned by the API.</p>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold">Skill Registry</h2>
+              <p className="mt-1 text-sm text-muted">
+                Showing {filteredSkills.length} of {skills.length} active or imported records returned by the API.
+              </p>
+            </div>
+            <label className="min-w-[280px] flex-1 md:max-w-md">
+              <span className="text-xs font-semibold uppercase text-muted">Search Skills</span>
+              <div className="mt-1 flex h-10 items-center gap-2 rounded-ui border border-border bg-background px-3 focus-within:border-accent">
+                <Search className="h-4 w-4 text-muted" />
+                <input
+                  suppressHydrationWarning
+                  value={skillSearch}
+                  onChange={(event) => setSkillSearch(event.target.value)}
+                  placeholder="Name, skill ID, policy, evidence, connector"
+                  className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
+                />
+                {skillSearch ? (
+                  <button type="button" onClick={() => setSkillSearch("")} className="text-muted transition hover:text-foreground" aria-label="Clear skill search">
+                    <XCircle className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
+            </label>
+          </div>
         </div>
         <div className="grid gap-0 divide-y divide-border">
-          {skills.map((skill) => (
+          {filteredSkills.map((skill) => (
             <article key={skill.id} className="grid gap-3 p-5 md:grid-cols-[1.4fr_1fr_auto_auto] md:items-center">
               <div>
                 <h3 className="text-sm font-semibold">{skill.name}</h3>
@@ -784,6 +814,9 @@ export function SkillsRegistry() {
             </article>
           ))}
           {skills.length === 0 ? <div className="p-5 text-sm text-muted">No skills loaded.</div> : null}
+          {skills.length > 0 && filteredSkills.length === 0 ? (
+            <div className="p-5 text-sm text-muted">No skills match "{skillSearch.trim()}".</div>
+          ) : null}
         </div>
       </section>
     </div>
@@ -795,6 +828,38 @@ function skillWhatItDoes(skill: SkillRecord) {
   const body = typeof snapshot.body === "string" ? snapshot.body.trim() : "";
   if (body) return body.length > 260 ? `${body.slice(0, 260)}...` : body;
   return skill.description ?? "No behavior summary available.";
+}
+
+function skillSearchText(skill: SkillRecord) {
+  const evidenceText = evidenceTasksFromSkill(skill)
+    .flatMap((task) => [
+      task.check_key,
+      task.label,
+      task.evidence_skill_id ?? "",
+      task.instructions,
+      ...task.success_criteria,
+      ...task.allowed_actions,
+      ...task.target_files
+    ])
+    .join(" ");
+  const policyText = (skill.matched_policies ?? []).map((policy) => `${policy.policy_id} ${policy.name} ${policy.decision}`).join(" ");
+  return [
+    skill.name,
+    skill.skill_id,
+    skill.category,
+    skill.default_risk_level,
+    skill.status,
+    skill.version_status,
+    skill.connector ?? "",
+    sourceTypeFromSkill(skill) ?? "",
+    skill.description ?? "",
+    skillWhatItDoes(skill),
+    ...(skill.policy_aliases ?? []),
+    policyText,
+    evidenceText
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function policyTargetKeys(policy: PolicyRecord) {

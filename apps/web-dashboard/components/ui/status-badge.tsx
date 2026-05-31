@@ -15,12 +15,14 @@ import {
 import { cn } from "@/lib/utils";
 
 type StatusKind = "decision" | "risk" | "run" | "token" | "audit" | "ai" | "approval" | "gate" | "worker" | "evidence";
-type Tone = "success" | "danger" | "warning" | "accent" | "muted" | "default";
+type Tone = "success" | "danger" | "warning" | "running" | "missing" | "accent" | "muted" | "default";
 
 const toneClasses: Record<Tone, string> = {
   success: "border-success/30 bg-success/10 text-success",
   danger: "border-danger/30 bg-danger/10 text-danger",
   warning: "border-warning/30 bg-warning/10 text-warning",
+  running: "border-cyan-300/30 bg-cyan-300/10 text-cyan-200",
+  missing: "border-orange-300/30 bg-orange-300/10 text-orange-200",
   accent: "border-accent/30 bg-accent/10 text-accent",
   muted: "border-border bg-background text-muted",
   default: "border-border bg-surface text-foreground"
@@ -30,33 +32,40 @@ const decisionTone: Record<string, Tone> = {
   ALLOW: "success",
   DENY: "danger",
   REQUIRE_APPROVAL: "warning",
-  FORCE_DRY_RUN: "accent"
+  FORCE_DRY_RUN: "running"
 };
 
 const riskTone: Record<string, Tone> = {
   info: "muted",
   low: "success",
-  medium: "accent",
+  medium: "running",
   high: "warning",
   critical: "danger"
 };
 
 const runTone: Record<string, Tone> = {
-  policy_evaluated: "success",
+  requested: "muted",
+  classified: "running",
+  policy_evaluated: "running",
   approval_required: "warning",
-  approval_pending: "accent",
-  dry_run_required: "accent",
-  approved: "success",
-  credential_issued: "accent",
-  execution_queued: "accent",
-  running: "accent",
+  approval_pending: "running",
+  dry_run_required: "warning",
+  dry_run_running: "running",
+  dry_run_completed: "success",
+  approved: "running",
+  credential_issued: "running",
+  execution_queued: "running",
+  executing: "running",
+  running: "running",
   completed: "success",
   failed: "danger",
-  denied: "danger"
+  denied: "danger",
+  rolled_back: "warning",
+  audited: "success"
 };
 
 const tokenTone: Record<string, Tone> = {
-  issued: "accent",
+  issued: "running",
   used: "success",
   expired: "warning",
   revoked: "danger"
@@ -66,7 +75,7 @@ const aiTone: Record<string, Tone> = {
   completed: "success",
   failed: "warning",
   disabled: "muted",
-  running: "accent",
+  running: "running",
   idle: "muted"
 };
 
@@ -75,17 +84,17 @@ const gateTone: Record<string, Tone> = {
   inactive: "warning",
   imported: "success",
   skipped: "muted",
-  preview: "accent",
+  preview: "running",
   passed: "success",
   failed: "danger",
-  missing: "warning",
+  missing: "missing",
   unknown: "muted",
   ready: "success",
   blocked: "warning",
   pending: "warning",
-  running: "accent",
-  collecting: "accent",
-  approved: "success",
+  running: "running",
+  collecting: "running",
+  approved: "running",
   denied: "danger",
   expired: "warning"
 };
@@ -93,18 +102,18 @@ const gateTone: Record<string, Tone> = {
 const workerTone: Record<string, Tone> = {
   online: "success",
   idle: "muted",
-  busy: "accent",
+  busy: "running",
   offline: "warning",
   error: "danger"
 };
 
 const evidenceTone: Record<string, Tone> = {
   queued: "warning",
-  claimed: "accent",
-  running: "accent",
+  claimed: "running",
+  running: "running",
   succeeded: "success",
   failed: "danger",
-  timed_out: "warning",
+  timed_out: "missing",
   cancelled: "muted"
 };
 

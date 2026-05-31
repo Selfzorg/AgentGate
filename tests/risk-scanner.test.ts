@@ -252,8 +252,24 @@ describe("PR2 policy simulation risk scanner", () => {
       }).decision
     ).toBe("REQUIRE_APPROVAL");
     expect(evaluatePolicy({ ...input, rules: rules.filter((rule) => rule.decision === "ALLOW") }).decision).toBe(
-      "ALLOW"
+      "REQUIRE_APPROVAL"
     );
+    expect(
+      evaluatePolicy({
+        ...input,
+        skill_id: "run-tests",
+        risk_level: "low",
+        context: {},
+        rules: [
+          {
+            ...baseRule,
+            when: { skill: "run-tests" },
+            policy_id: "allow_low_risk_tests",
+            decision: "ALLOW"
+          }
+        ]
+      }).decision
+    ).toBe("ALLOW");
   });
 });
 

@@ -70,6 +70,14 @@ export function ApprovalCard() {
   }
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const query = params.get("q") ?? params.get("run_id") ?? "";
+    if (query) {
+      setSearchInput(query);
+      setSearchQuery(query);
+      void loadApprovals({ query });
+      return;
+    }
     void loadApprovals();
   }, []);
 
@@ -128,7 +136,7 @@ export function ApprovalCard() {
           <RelatedRunSearchResults
             runs={relatedRuns}
             pendingAction={pendingAction}
-            onDryRun={(runId) => void runAction("Dry-Run", () => runSkillRunDryRun(runId))}
+            onDryRun={(runId) => void runAction("Start Dry-Run", () => runSkillRunDryRun(runId))}
           />
         ) : null}
         <section className="max-w-2xl rounded-ui border border-border bg-surface p-5 shadow-panel">
@@ -158,6 +166,7 @@ export function ApprovalCard() {
           collecting ||
           missingChecks.length > 0 ||
           (approval.risk_level === "critical" && comment.trim().length === 0);
+        const approveLabel = approvalApproveLabel(approval, missingChecks.length, comment);
 
         return (
           <section key={approval.id} className="rounded-ui border border-border bg-surface p-5 shadow-panel">
@@ -176,6 +185,7 @@ export function ApprovalCard() {
             </div>
 
             <ApprovalNextStep approval={approval} missingChecks={missingChecks.length} comment={comment} />
+            <ApprovalStepRail approval={approval} missingChecks={missingChecks.length} />
 
             <div className="mt-4 grid gap-4 lg:grid-cols-[1.2fr_1fr]">
               <div>
@@ -196,9 +206,9 @@ export function ApprovalCard() {
                             <StatusBadge kind="gate" value={check.status} />
                             {taskId ? (
                               <Button asChild variant="ghost">
-                                <a href={`/evidence?task_id=${taskId}`}>
+                                <a href={`/evidence?task_id=${taskId}&run_id=${approval.skill_run.id}&check_key=${check.check_key}`}>
                                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                                  Open Evidence
+                                  View Evidence
                                 </a>
                               </Button>
                             ) : null}
@@ -210,7 +220,7 @@ export function ApprovalCard() {
                               }
                             >
                               <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                              Retry
+                              Retry Evidence
                             </Button>
                           </div>
                         </div>
@@ -248,7 +258,7 @@ export function ApprovalCard() {
 
             <div className="mt-5 flex flex-wrap gap-2">
               {approval.status === "approved" ? (
-                <Button asChild variant="accent">
+                <Button asChild variant="success">
                   <a href={`/skill-runs/${approval.skill_run.id}`}>
                     <ExternalLink className="h-4 w-4" aria-hidden="true" />
                     Continue Execution
@@ -256,22 +266,22 @@ export function ApprovalCard() {
                 </Button>
               ) : null}
               <Button
-                variant="accent"
+                variant="success"
                 disabled={approveBlocked || pendingAction !== null}
                 onClick={() =>
                   void runAction("Approve Once", () => approveApproval(approval.id, comment))
                 }
               >
                 <Check className="h-4 w-4" aria-hidden="true" />
-                Approve Once
+                {approveLabel}
               </Button>
               <Button
-                variant={approval.risk_level === "critical" ? "default" : "secondary"}
+                variant="warning"
                 disabled={approval.status !== "pending" || pendingAction !== null}
-                onClick={() => void runAction("Force Dry-Run", () => forceDryRun(approval.id))}
+                onClick={() => void runAction("Start Dry-Run", () => forceDryRun(approval.id))}
               >
                 <FlaskConical className="h-4 w-4" aria-hidden="true" />
-                Force Dry-Run
+                Start Dry-Run
               </Button>
               <Button
                 variant="secondary"
@@ -282,7 +292,7 @@ export function ApprovalCard() {
                 Retry Evidence
               </Button>
               <Button
-                variant="secondary"
+                variant="danger"
                 disabled={approval.status !== "pending" || pendingAction !== null}
                 onClick={() => void runAction("Deny", () => denyApproval(approval.id, comment))}
               >
@@ -292,13 +302,13 @@ export function ApprovalCard() {
               <Button asChild variant="ghost">
                 <a href={`/audit/${approval.skill_run.trace_id}`}>
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                  Open Trace
+                  Open Audit
                 </a>
               </Button>
               <Button asChild variant="ghost">
                 <a href={`/skill-runs/${approval.skill_run.id}`}>
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                  {approval.status === "approved" ? "Run Details" : "Review Run"}
+                  Open Run
                 </a>
               </Button>
             </div>
@@ -356,27 +366,59 @@ function RelatedRunSearchResults({
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               {canDryRun ? (
-                <Button variant="secondary" disabled={pendingAction !== null} onClick={() => onDryRun(run.id)}>
+                <Button variant="warning" disabled={pendingAction !== null} onClick={() => onDryRun(run.id)}>
                   <FlaskConical className="h-4 w-4" aria-hidden="true" />
-                  {pendingAction === "Dry-Run" ? "Running" : "Dry-Run"}
+                  {pendingAction === "Start Dry-Run" ? "Running Dry-Run" : "Start Dry-Run"}
                 </Button>
               ) : null}
               <Button asChild variant="ghost">
                 <a href={`/skill-runs/${run.id}`}>
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                  Review Run
+                  Open Run
                 </a>
               </Button>
               <Button asChild variant="ghost">
                 <a href={`/audit/${run.trace_id}`}>
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                  Open Trace
+                  Open Audit
                 </a>
               </Button>
             </div>
           </section>
         );
       })}
+    </div>
+  );
+}
+
+function ApprovalStepRail({ approval, missingChecks }: { approval: ApprovalRecord; missingChecks: number }) {
+  const evidenceDone = approval.approval_readiness === "ready" && missingChecks === 0;
+  const approvalDone = approval.status === "approved";
+  const tokenReady = approval.skill_run.status === "credential_issued" || approval.skill_run.status === "execution_queued" || approval.skill_run.status === "completed";
+  const executionDone = approval.skill_run.status === "completed";
+  const steps = [
+    { label: "Evidence", done: evidenceDone, active: approval.approval_readiness === "collecting" },
+    { label: "Approval", done: approvalDone, active: evidenceDone && approval.status === "pending" },
+    { label: "Token", done: tokenReady, active: approvalDone && !tokenReady },
+    { label: "Execute", done: executionDone, active: tokenReady && !executionDone }
+  ];
+
+  return (
+    <div className="mt-3 grid gap-2 md:grid-cols-4">
+      {steps.map((step, index) => (
+        <div
+          key={step.label}
+          className={`rounded-ui border px-3 py-2 text-xs ${
+            step.done
+              ? "border-success/30 bg-success/10 text-success"
+              : step.active
+                ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-200"
+                : "border-border bg-background text-muted"
+          }`}
+        >
+          <span className="font-semibold">{index + 1}. {step.label}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -406,6 +448,15 @@ function evidenceTaskId(evidence: Record<string, unknown>): string | null {
 
 function recordFrom(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function approvalApproveLabel(approval: ApprovalRecord, missingChecks: number, comment: string) {
+  if (approval.status === "approved") return "Approved";
+  if (approval.status !== "pending") return "Approval Closed";
+  if (approval.approval_readiness === "collecting") return "Waiting for Evidence";
+  if (missingChecks > 0) return "Resolve Gate Checks";
+  if (approval.risk_level === "critical" && comment.trim().length === 0) return "Add Comment to Approve";
+  return "Approve Once";
 }
 
 function ApprovalNextStep({
@@ -447,7 +498,7 @@ function approvalNextStepCopy(approval: ApprovalRecord, missingChecks: number, c
   if (approval.approval_readiness === "collecting") {
     return {
       title: "Next: wait for evidence",
-      body: "Evidence workers are still collecting required checks. Open Evidence to inspect task progress or retry a stalled check.",
+      body: "Evidence workers are still collecting required checks. View Evidence to inspect task progress or retry a stalled check.",
       tone: "border-accent/30 bg-accent/5 text-foreground"
     };
   }

@@ -28,6 +28,16 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluationRe
   );
 
   if (matchedPolicy) {
+    if (matchedPolicy.decision === "ALLOW" && isHighRisk(input.risk_level)) {
+      return {
+        decision: "REQUIRE_APPROVAL",
+        reason: `High-risk action matched allow policy ${matchedPolicy.policy_id}, but high-risk actions require approval unless a stronger policy applies.`,
+        matched_policy: matchedPolicy,
+        required_checks: [],
+        approvers: ["service_owner"]
+      };
+    }
+
     return {
       decision: matchedPolicy.decision,
       reason: matchedPolicy.reason,
@@ -68,4 +78,8 @@ function valueForPolicyKey(key: string, input: PolicyEvaluationInput): unknown {
   if (key === "role") return input.role;
   if (key === "skill") return [input.skill_id, ...(input.skill_aliases ?? [])];
   return input.context[key];
+}
+
+function isHighRisk(riskLevel: RiskLevel) {
+  return riskLevel === "high" || riskLevel === "critical";
 }

@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 const next = "next";
 const useShell = process.platform === "win32";
 const parsed = parsePortOption(process.argv.slice(2), process.env.WEB_PORT ?? "3000");
+const lockPath = resolve(process.cwd(), "../../.agentgate/run/web-dashboard-dev.lock.json");
+const lock = claimDevServerLock(lockPath, parsed.port);
 
 const child = spawn(next, ["dev", "--port", parsed.port, ...parsed.args], {
   stdio: "inherit",
@@ -12,14 +16,23 @@ const child = spawn(next, ["dev", "--port", parsed.port, ...parsed.args], {
 });
 
 child.on("error", (error) => {
+  releaseDevServerLock(lock);
   console.error(`Failed to run next dev: ${error.message}`);
   process.exit(1);
 });
 
-process.on("SIGINT", () => child.kill("SIGINT"));
-process.on("SIGTERM", () => child.kill("SIGTERM"));
+process.on("SIGINT", () => {
+  releaseDevServerLock(lock);
+  child.kill("SIGINT");
+});
+process.on("SIGTERM", () => {
+  releaseDevServerLock(lock);
+  child.kill("SIGTERM");
+});
+process.on("exit", () => releaseDevServerLock(lock));
 
 child.on("exit", (code, signal) => {
+  releaseDevServerLock(lock);
   if (signal) {
     process.kill(process.pid, signal);
     return;
@@ -58,4 +71,52 @@ function parsePortOption(args, fallbackPort) {
     port: String(numericPort),
     args: remaining
   };
+}
+
+function claimDevServerLock(path, port) {
+  mkdirSync(dirname(path), { recursive: true });
+
+  const existing = readDevServerLock(path);
+  if (existing && existing.pid !== process.pid && isProcessAlive(existing.pid)) {
+    console.error(
+      `Web dashboard dev server is already running on port ${existing.port} with pid ${existing.pid}. ` +
+        "Stop that process before starting another one; concurrent Next dev servers corrupt the shared .next cache."
+    );
+    process.exit(1);
+  }
+
+  const lock = {
+    path,
+    pid: process.pid,
+    port,
+    started_at: new Date().toISOString()
+  };
+  writeFileSync(path, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+  return lock;
+}
+
+function readDevServerLock(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseDevServerLock(lock) {
+  if (!lock) return;
+  const current = readDevServerLock(lock.path);
+  if (current?.pid === lock.pid) {
+    rmSync(lock.path, { force: true });
+  }
 }

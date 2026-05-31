@@ -1,20 +1,14 @@
 import { PageHeader } from "@/components/shell/PageHeader";
-import { PlaceholderPanel } from "@/components/shell/PlaceholderPanel";
+import { SkillRunIndex } from "@/components/skill-runs/SkillRunIndex";
 
 export default function SkillRunsPage() {
   return (
     <div>
       <PageHeader
         title="Skill Runs"
-        description="Decision replay now persists skill_runs. Detailed execution controls remain reserved for later phases."
+        description="Search recent governed runs, inspect next actions, and jump to approvals, evidence, audit, or execution logs."
       />
-      <PlaceholderPanel title="Run index placeholder">
-        Use Live Activity to replay fixture actions and open audit traces. A fuller skill run index arrives with approval and execution phases. Sample detail shell:{" "}
-        <a className="font-medium text-accent" href="/skill-runs/run_demo_placeholder">
-          run_demo_placeholder
-        </a>
-        .
-      </PlaceholderPanel>
+      <SkillRunIndex />
     </div>
   );
 }

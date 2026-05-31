@@ -27,3 +27,35 @@ export type AuditIntegrityRecord = {
   };
   checked_at: string;
 };
+
+export type AuditTraceRecord = {
+  trace_id: string;
+  skill_run_id: string | null;
+  event_count: number;
+  event_types: string[];
+  first_event_at: string | null;
+  latest_event_at: string | null;
+  latest_event: {
+    id: string;
+    event_type: string;
+    actor_type: string;
+    actor_id: string | null;
+    sequence: number | null;
+    created_at: string;
+  } | null;
+  lifecycle: AuditIntegrityRecord;
+  run: {
+    id: string;
+    raw_action: string;
+    status: string;
+    decision: string | null;
+    risk_level: string | null;
+    environment: string | null;
+    skill_id: string | null;
+    skill_name: string | null;
+  } | null;
+};
+
+export type AuditTraceResponse = {
+  audit_traces: AuditTraceRecord[];
+};

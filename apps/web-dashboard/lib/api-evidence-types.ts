@@ -60,11 +60,18 @@ export type EvidenceMonitorTaskRecord = {
   } | null;
   skill_run: {
     id: string;
+    trace_id?: string;
     raw_action: string;
     status: string;
     decision: DecisionResponse["decision"] | null;
     environment: string | null;
+    risk_level?: string | null;
+    skill_id?: string | null;
+    skill_name?: string | null;
+    matched_policy_id?: string | null;
   };
+  gate_check?: GateCheckRecord;
+  audit_events?: EvidenceMonitorEventRecord[];
 };
 
 export type EvidenceMonitorEventRecord = {

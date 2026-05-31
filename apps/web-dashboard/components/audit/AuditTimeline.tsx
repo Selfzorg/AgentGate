@@ -11,6 +11,7 @@ import {
   type SkillRunDetailResponse
 } from "@/lib/api-client";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { LifecycleTimeline } from "@/components/lifecycle/LifecycleTimeline";
 
 export function AuditTimeline({ traceId }: { traceId: string }) {
   const [events, setEvents] = useState<AuditEventRecord[]>([]);
@@ -157,6 +158,10 @@ export function AuditTimeline({ traceId }: { traceId: string }) {
           </div>
         </div>
       ) : null}
+
+      <div className="mt-5">
+        <LifecycleTimeline title="Trace Lifecycle" auditEvents={events} executionLogs={run?.execution_logs ?? []} embedded />
+      </div>
 
       <ol className="mt-5 space-y-3">
         {events.length === 0 ? (

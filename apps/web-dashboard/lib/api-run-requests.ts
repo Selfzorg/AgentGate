@@ -1,5 +1,40 @@
-import type { AiRunAnalysisRecord, ClaudeHandoffResponse, DryRunResponse, ExecuteSkillRunResponse, IssueExecutionTokenResponse, SkillRunDetailResponse } from "./api-types";
+import type {
+  AiRunAnalysisRecord,
+  ClaudeHandoffResponse,
+  DryRunResponse,
+  ExecuteSkillRunResponse,
+  IssueExecutionTokenResponse,
+  SkillRunDetailResponse,
+  SkillRunListResponse
+} from "./api-types";
 import { apiBaseUrl } from "./api-config";
+
+export async function getSkillRuns(
+  options: {
+    limit?: number;
+    q?: string;
+    status?: string;
+    decision?: string;
+    risk_level?: string;
+    skill_id?: string;
+    trace_id?: string;
+    environment?: string;
+  } = {}
+): Promise<SkillRunListResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs${params.size ? `?${params.toString()}` : ""}`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load skill runs: ${response.status}`);
+  }
+
+  return (await response.json()) as SkillRunListResponse;
+}
 
 export async function runSkillRunDryRun(runId: string): Promise<DryRunResponse> {
   const response = await fetch(`${apiBaseUrl}/api/v1/skill-runs/${runId}/dry-run`, {

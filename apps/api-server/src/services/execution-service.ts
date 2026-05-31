@@ -183,6 +183,34 @@ export async function queueSkillRunExecution(prisma: PrismaClient, input: QueueE
       }
     });
 
+    await appendExecutionLog(tx, {
+      tenantId: run.tenantId,
+      workspaceId: run.workspaceId,
+      skillRunId: run.id,
+      message: "Execution queue accepted.",
+      metadata: {
+        attempt_id: attempt.id,
+        idempotency_key: input.idempotencyKey,
+        credential_mode: credentialMode,
+        requested_by: input.requestedBy ?? "system"
+      }
+    });
+
+    if (executionToken) {
+      await appendExecutionLog(tx, {
+        tenantId: run.tenantId,
+        workspaceId: run.workspaceId,
+        skillRunId: run.id,
+        message: "Execution token consumed for queued run.",
+        metadata: {
+          attempt_id: attempt.id,
+          execution_token_id: executionToken.id,
+          token_status: "used",
+          credential_mode: credentialMode
+        }
+      });
+    }
+
     await tx.skillRun.update({
       where: { id: run.id },
       data: { status: "execution_queued" }
@@ -374,6 +402,36 @@ async function emitExecutionRejected(
     actorId: "system",
     metadata: {
       reason
+    }
+  });
+}
+
+async function appendExecutionLog(
+  prisma: Prisma.TransactionClient,
+  input: {
+    tenantId: string;
+    workspaceId: string;
+    skillRunId: string;
+    level?: "debug" | "info" | "warn" | "error" | undefined;
+    message: string;
+    metadata: Record<string, unknown>;
+  }
+) {
+  const latest = await prisma.executionLog.findFirst({
+    where: { skillRunId: input.skillRunId },
+    orderBy: { sequence: "desc" }
+  });
+
+  await prisma.executionLog.create({
+    data: {
+      id: createId("elog"),
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      skillRunId: input.skillRunId,
+      sequence: (latest?.sequence ?? 0) + 1,
+      level: input.level ?? "info",
+      message: input.message,
+      metadata: input.metadata as Prisma.InputJsonValue
     }
   });
 }

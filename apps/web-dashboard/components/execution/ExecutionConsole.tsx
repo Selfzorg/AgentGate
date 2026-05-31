@@ -15,6 +15,7 @@ import {
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { LifecycleTimeline } from "@/components/lifecycle/LifecycleTimeline";
 import { ExecutionNextStep, ExecutionStepRail } from "./ExecutionFlow";
 
 const CLAUDE_IMPORTED_SOURCE_TYPES = new Set(["claude_skill", "claude_command", "claude_subagent"]);
@@ -302,7 +303,15 @@ export function ExecutionConsole({ runId }: { runId: string }) {
         </p>
       ) : null}
       <p className="mt-4 text-sm text-muted">{status}</p>
-      <div className="mt-5 overflow-hidden rounded-ui border border-border">
+      <div className="mt-5">
+        <LifecycleTimeline
+          title="Run Lifecycle"
+          auditEvents={run?.audit_events ?? []}
+          executionLogs={logs}
+          embedded
+        />
+      </div>
+      <div id="execution-logs" className="mt-5 overflow-hidden rounded-ui border border-border">
         <div className="border-b border-border bg-background px-3 py-2 text-xs uppercase text-muted">
           Execution Logs
         </div>

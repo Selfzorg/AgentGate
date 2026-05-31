@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowUp, Clock3, ExternalLink, ListChecks, RefreshCw, ServerCog, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Activity, ArrowUp, Clock3, ExternalLink, ListChecks, RefreshCw, Search, ServerCog, Trash2, X } from "lucide-react";
 import {
   clearActiveEvidenceQueue,
+  getEvidenceTask,
   getEvidenceMonitor,
   prioritizeEvidenceTask,
   type EvidenceMonitorResponse,
@@ -12,25 +13,50 @@ import {
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { LifecycleTimeline } from "@/components/lifecycle/LifecycleTimeline";
 
 const taskColumns = ["Task", "Check", "Runtime", "Priority", "Worker", "Status", "Run", "Updated"];
+const evidenceStatuses = ["", "queued", "claimed", "running", "succeeded", "failed", "timed_out", "cancelled"];
 
 export function EvidenceMonitor() {
   const [monitor, setMonitor] = useState<EvidenceMonitorResponse | null>(null);
   const [status, setStatus] = useState("Loading evidence queue...");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [directTask, setDirectTask] = useState<EvidenceMonitorTaskRecord | null>(null);
+  const [filters, setFilters] = useState({
+    q: "",
+    task_id: "",
+    run_id: "",
+    trace_id: "",
+    check_key: "",
+    status: "",
+    runtime: ""
+  });
+  const [appliedFilters, setAppliedFilters] = useState(filters);
   const [refreshing, setRefreshing] = useState(true);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
-  async function loadMonitor() {
+  async function loadMonitor(nextFilters = appliedFilters) {
     setRefreshing(true);
     try {
-      const response = await getEvidenceMonitor();
+      const response = await getEvidenceMonitor(cleanFilters(nextFilters));
       setMonitor(response);
       setStatus(
-        `${response.queue.active} active evidence tasks, ${response.workers.length} worker records, ${response.events.length} recent events.`
+        `${response.queue.active} active evidence tasks, ${response.tasks.length} matching tasks, ${response.workers.length} worker records.`
       );
-      if (!selectedTaskId && response.tasks.length > 0) {
+      const requestedTaskId = nextFilters.task_id || selectedTaskId;
+      if (requestedTaskId && !response.tasks.some((task) => task.id === requestedTaskId)) {
+        try {
+          const detail = await getEvidenceTask(requestedTaskId);
+          setDirectTask(detail.evidence_task);
+          setSelectedTaskId(requestedTaskId);
+        } catch {
+          setDirectTask(null);
+        }
+      } else {
+        setDirectTask(null);
+      }
+      if (!requestedTaskId && response.tasks.length > 0) {
         setSelectedTaskId(response.tasks[0]?.id ?? null);
       }
     } catch {
@@ -41,8 +67,19 @@ export function EvidenceMonitor() {
   }
 
   useEffect(() => {
-    const taskId = new URLSearchParams(window.location.search).get("task_id");
-    if (taskId) setSelectedTaskId(taskId);
+    const params = new URLSearchParams(window.location.search);
+    const initial = {
+      q: params.get("q") ?? "",
+      task_id: params.get("task_id") ?? "",
+      run_id: params.get("run_id") ?? "",
+      trace_id: params.get("trace_id") ?? "",
+      check_key: params.get("check_key") ?? "",
+      status: params.get("status") ?? "",
+      runtime: params.get("runtime") ?? ""
+    };
+    setFilters(initial);
+    setAppliedFilters(initial);
+    if (initial.task_id) setSelectedTaskId(initial.task_id);
   }, []);
 
   useEffect(() => {
@@ -51,13 +88,26 @@ export function EvidenceMonitor() {
     async function load() {
       setRefreshing(true);
       try {
-        const response = await getEvidenceMonitor();
+        const response = await getEvidenceMonitor(cleanFilters(appliedFilters));
         if (!cancelled) {
           setMonitor(response);
           setStatus(
-            `${response.queue.active} active evidence tasks, ${response.workers.length} worker records, ${response.events.length} recent events.`
+            `${response.queue.active} active evidence tasks, ${response.tasks.length} matching tasks, ${response.workers.length} worker records.`
           );
-          if (!selectedTaskId && response.tasks.length > 0) {
+          if (appliedFilters.task_id && !response.tasks.some((task) => task.id === appliedFilters.task_id)) {
+            try {
+              const detail = await getEvidenceTask(appliedFilters.task_id);
+              if (!cancelled) {
+                setDirectTask(detail.evidence_task);
+                setSelectedTaskId(appliedFilters.task_id);
+              }
+            } catch {
+              if (!cancelled) setDirectTask(null);
+            }
+          } else if (!cancelled) {
+            setDirectTask(null);
+          }
+          if (!selectedTaskId && !appliedFilters.task_id && response.tasks.length > 0) {
             setSelectedTaskId(response.tasks[0]?.id ?? null);
           }
         }
@@ -77,7 +127,33 @@ export function EvidenceMonitor() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [selectedTaskId]);
+  }, [appliedFilters, selectedTaskId]);
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAppliedFilters(filters);
+    const params = new URLSearchParams(cleanFilters(filters));
+    window.history.replaceState(null, "", `/evidence${params.size ? `?${params.toString()}` : ""}`);
+    if (filters.task_id) setSelectedTaskId(filters.task_id);
+    void loadMonitor(filters);
+  }
+
+  function clearFilters() {
+    const empty = {
+      q: "",
+      task_id: "",
+      run_id: "",
+      trace_id: "",
+      check_key: "",
+      status: "",
+      runtime: ""
+    };
+    setFilters(empty);
+    setAppliedFilters(empty);
+    setDirectTask(null);
+    window.history.replaceState(null, "", "/evidence");
+    void loadMonitor(empty);
+  }
 
   async function handleClearQueue() {
     if (!window.confirm("Cancel all active evidence tasks? Historical completed evidence will stay in the audit trail.")) return;
@@ -106,9 +182,15 @@ export function EvidenceMonitor() {
     }
   }
 
+  const tasks = useMemo(() => {
+    const rows = monitor?.tasks ?? [];
+    if (!directTask || rows.some((task) => task.id === directTask.id)) return rows;
+    return [directTask, ...rows];
+  }, [directTask, monitor]);
+
   const selectedTask = useMemo(
-    () => monitor?.tasks.find((task) => task.id === selectedTaskId) ?? monitor?.tasks[0] ?? null,
-    [monitor, selectedTaskId]
+    () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null,
+    [tasks, selectedTaskId]
   );
 
   if (!monitor) {
@@ -132,6 +214,42 @@ export function EvidenceMonitor() {
 
   return (
     <div className="space-y-5">
+      <form className="rounded-ui border border-border bg-surface p-4 shadow-panel" onSubmit={handleSearch}>
+        <div className="grid gap-3 lg:grid-cols-[1.4fr_repeat(5,minmax(120px,1fr))_auto_auto]">
+          <TextFilter label="Search" value={filters.q} placeholder="Task, run, trace, check, action" onChange={(q) => setFilters((current) => ({ ...current, q }))} />
+          <TextFilter label="Task ID" value={filters.task_id} placeholder="evtsk_..." onChange={(task_id) => setFilters((current) => ({ ...current, task_id }))} />
+          <TextFilter label="Run ID" value={filters.run_id} placeholder="run_..." onChange={(run_id) => setFilters((current) => ({ ...current, run_id }))} />
+          <TextFilter label="Trace ID" value={filters.trace_id} placeholder="trc_..." onChange={(trace_id) => setFilters((current) => ({ ...current, trace_id }))} />
+          <TextFilter label="Check" value={filters.check_key} placeholder="ci_passed" onChange={(check_key) => setFilters((current) => ({ ...current, check_key }))} />
+          <label className="text-sm font-medium">
+            Status
+            <select
+              suppressHydrationWarning
+              className="mt-2 h-9 w-full rounded-ui border border-border bg-background px-2 text-sm outline-none focus:border-accent"
+              value={filters.status}
+              onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
+            >
+              {evidenceStatuses.map((value) => (
+                <option key={value || "all"} value={value}>
+                  {value || "all"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button className="self-end" type="submit" variant="primary" disabled={refreshing || pendingAction !== null}>
+            <Search className="h-4 w-4" aria-hidden="true" />
+            Search
+          </Button>
+          <Button className="self-end" type="button" variant="ghost" disabled={refreshing || pendingAction !== null} onClick={clearFilters}>
+            <X className="h-4 w-4" aria-hidden="true" />
+            Clear
+          </Button>
+        </div>
+        <div className="mt-3 max-w-sm">
+          <TextFilter label="Runtime" value={filters.runtime} placeholder="codex_cli" onChange={(runtime) => setFilters((current) => ({ ...current, runtime }))} />
+        </div>
+      </form>
+
       <section className="rounded-ui border border-border bg-surface p-5 shadow-panel">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -201,8 +319,8 @@ export function EvidenceMonitor() {
                 </tr>
               </thead>
               <tbody>
-                {monitor?.tasks.length ? (
-                  monitor.tasks.map((task) => (
+                {tasks.length ? (
+                  tasks.map((task) => (
                     <tr
                       key={task.id}
                       className="cursor-pointer border-b border-border last:border-b-0 hover:bg-muted/10"
@@ -235,7 +353,7 @@ export function EvidenceMonitor() {
                 ) : (
                   <tr>
                     <td className="px-4 py-8 text-muted" colSpan={taskColumns.length}>
-                      No evidence tasks have been created yet.
+                      No evidence tasks match the current filters.
                     </td>
                   </tr>
                 )}
@@ -364,7 +482,7 @@ function TaskDetail({
 
       <div className="mt-5 flex flex-wrap gap-2">
         <Button
-          variant="accent"
+          variant="primary"
           disabled={!isActiveTask(task.status) || pendingAction !== null}
           onClick={() => onPrioritize(task.id)}
         >
@@ -374,7 +492,7 @@ function TaskDetail({
         <Button asChild variant="secondary">
           <a href={`/skill-runs/${task.skill_run_id}`}>
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
-            Review Linked Run
+            Open Run
           </a>
         </Button>
         <Button asChild variant="ghost">
@@ -383,6 +501,25 @@ function TaskDetail({
             Open Trace
           </a>
         </Button>
+      </div>
+
+      {task.gate_check ? (
+        <div className="mt-5 rounded-ui border border-border bg-background p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="font-semibold">{task.gate_check.label}</div>
+              <div className="mt-1 font-mono text-xs text-muted">{task.gate_check.check_key}</div>
+            </div>
+            <StatusBadge kind="gate" value={task.gate_check.status} />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-5">
+        <h3 className="text-sm font-semibold">Input</h3>
+        <pre className="mt-2 max-h-56 overflow-auto rounded-ui border border-border bg-background p-3 text-xs leading-5 text-muted">
+          {jsonPreview(task.input)}
+        </pre>
       </div>
 
       <div className="mt-5">
@@ -398,6 +535,15 @@ function TaskDetail({
           {jsonPreview(task.error)}
         </pre>
       </div>
+
+      <div className="mt-5">
+        <LifecycleTimeline
+          title="Evidence Lifecycle"
+          evidenceTasks={[task]}
+          evidenceEvents={task.audit_events ?? []}
+          embedded
+        />
+      </div>
     </section>
   );
 }
@@ -412,6 +558,21 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <div className="text-muted">{label}</div>
       <div className="min-w-0 truncate font-mono text-xs">{value}</div>
     </div>
+  );
+}
+
+function TextFilter({ label, value, placeholder, onChange }: { label: string; value: string; placeholder: string; onChange: (value: string) => void }) {
+  return (
+    <label className="text-sm font-medium">
+      {label}
+      <input
+        suppressHydrationWarning
+        className="mt-2 h-9 w-full rounded-ui border border-border bg-background px-3 text-sm outline-none focus:border-accent"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+      />
+    </label>
   );
 }
 
@@ -446,4 +607,8 @@ function formatDuration(ms: number) {
 function jsonPreview(value: unknown) {
   const formatted = JSON.stringify(value ?? {}, null, 2);
   return formatted.length > 1200 ? `${formatted.slice(0, 1200)}\n...` : formatted;
+}
+
+function cleanFilters(filters: Record<string, string>) {
+  return Object.fromEntries(Object.entries(filters).filter(([, value]) => value.trim().length > 0));
 }

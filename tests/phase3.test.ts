@@ -356,9 +356,17 @@ describe("PR1 governance scenario harness", () => {
       status: "completed",
       executionTokenId: token.execution_token.execution_token_id
     });
-    expect(approvalRun.executionLogs.map((log) => log.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(approvalRun.executionLogs.map((log) => log.sequence)).toEqual(
+      Array.from({ length: approvalRun.executionLogs.length }, (_, index) => index + 1)
+    );
     expect(approvalRun.executionLogs.map((log) => log.message)).toEqual(
       expect.arrayContaining([
+        "Execution queue accepted.",
+        "Execution token consumed for queued run.",
+        "Runner claimed execution attempt.",
+        "Execution controls validated.",
+        "Connector selected.",
+        "Connector input validation passed.",
         "Starting deployment connector",
         "Using scoped token deploy:production",
         "Deployment simulation completed successfully."
@@ -491,9 +499,17 @@ describe("Phase 3 execution tokens and runner", () => {
 
     expect(run.status).toBe("completed");
     expect(run.executionTokens[0]?.status).toBe("used");
-    expect(run.executionLogs.map((log) => log.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(run.executionLogs.map((log) => log.sequence)).toEqual(
+      Array.from({ length: run.executionLogs.length }, (_, index) => index + 1)
+    );
     expect(run.executionLogs.map((log) => log.message)).toEqual(
       expect.arrayContaining([
+        "Execution queue accepted.",
+        "Execution token consumed for queued run.",
+        "Runner claimed execution attempt.",
+        "Execution controls validated.",
+        "Connector selected.",
+        "Connector input validation passed.",
         "Starting deployment connector",
         "Rollout plan accepted",
         "Deployment simulation completed successfully."

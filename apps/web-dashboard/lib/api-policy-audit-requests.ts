@@ -1,4 +1,4 @@
-import type { AuditEventRecord, AuditIntegrityRecord, PolicyRecord } from "./api-types";
+import type { AuditEventRecord, AuditIntegrityRecord, AuditTraceResponse, PolicyRecord } from "./api-types";
 import { apiBaseUrl } from "./api-config";
 
 export async function getPolicies(options: { includeInactive?: boolean } = {}): Promise<{ policies: PolicyRecord[] }> {
@@ -52,6 +52,24 @@ export async function setPolicyStatus(policyId: string, status: "enable" | "disa
   }
 
   return (await response.json()) as { policy: PolicyRecord };
+}
+
+export async function getAuditTraces(
+  options: { limit?: number; q?: string; run_id?: string; trace_id?: string; event_type?: string } = {}
+): Promise<AuditTraceResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  const response = await fetch(`${apiBaseUrl}/api/v1/audit-traces${params.size ? `?${params.toString()}` : ""}`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load audit traces: ${response.status}`);
+  }
+
+  return (await response.json()) as AuditTraceResponse;
 }
 
 export async function getAuditEventsByTrace(traceId: string): Promise<{ audit_events: AuditEventRecord[] }> {

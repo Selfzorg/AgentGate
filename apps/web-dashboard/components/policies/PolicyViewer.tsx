@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, Power, PowerOff, Save } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, Loader2, Power, PowerOff, Save, Search, X } from "lucide-react";
 import { getPolicies, setPolicyStatus, upsertPolicy, type PolicyRecord } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -44,8 +44,18 @@ function listValue(value: unknown): string {
 export function PolicyViewer() {
   const [policies, setPolicies] = useState<PolicyRecord[]>([]);
   const [form, setForm] = useState<PolicyForm>(emptyForm);
+  const [editingPolicyId, setEditingPolicyId] = useState<string | null>(null);
+  const [policySearchText, setPolicySearchText] = useState("");
   const [status, setStatus] = useState("Loading seeded policies...");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const editorRef = useRef<HTMLElement | null>(null);
+
+  const sortedPolicies = useMemo(() => policies.slice().sort((left, right) => right.priority - left.priority), [policies]);
+  const filteredPolicies = useMemo(() => {
+    const query = policySearchText.trim().toLowerCase();
+    if (!query) return sortedPolicies;
+    return sortedPolicies.filter((policy) => policySearchHaystack(policy).includes(query));
+  }, [policySearchText, sortedPolicies]);
 
   useEffect(() => {
     void loadPolicies();
@@ -63,6 +73,7 @@ export function PolicyViewer() {
 
   function editPolicy(policy: PolicyRecord) {
     const when = recordFrom(policy.when ?? recordFrom(policy.definition).when);
+    setEditingPolicyId(policy.policy_id);
     setForm({
       policy_id: policy.policy_id,
       name: policy.name,
@@ -78,6 +89,16 @@ export function PolicyViewer() {
       approvers: listValue(policy.approvers) === "none" ? "" : listValue(policy.approvers)
     });
     setStatus(`Editing ${policy.policy_id}. Saving creates a new active policy version.`);
+    window.requestAnimationFrame(() => {
+      editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      editorRef.current?.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
+    });
+  }
+
+  function resetEditor() {
+    setEditingPolicyId(null);
+    setForm(emptyForm);
+    setStatus(`${policies.length} policies loaded from the API.`);
   }
 
   async function savePolicy() {
@@ -102,6 +123,7 @@ export function PolicyViewer() {
       });
       const warningText = response.warnings?.length ? ` Warnings: ${response.warnings.join(" ")}` : "";
       setStatus(`Saved ${response.policy.policy_id}. A new active policy version is available.${warningText}`);
+      setEditingPolicyId(null);
       setForm(emptyForm);
       await loadPolicies();
     } catch (error) {
@@ -127,9 +149,14 @@ export function PolicyViewer() {
 
   return (
     <div className="grid min-w-0 gap-5">
-      <section className="min-w-0 rounded-ui border border-border bg-surface p-5 shadow-panel">
-        <h2 className="text-base font-semibold">Policy Editor</h2>
-        <p className="mt-1 text-sm text-muted">Create or edit policy rules. Saves create a new active PolicyVersion.</p>
+      <section ref={editorRef} className="min-w-0 scroll-mt-24 rounded-ui border border-border bg-surface p-5 shadow-panel">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">Policy Editor</h2>
+            <p className="mt-1 text-sm text-muted">Create or edit policy rules. Saves create a new active PolicyVersion.</p>
+          </div>
+          {editingPolicyId ? <StatusBadge kind="gate" value="preview" label={`Editing ${editingPolicyId}`} /> : null}
+        </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
           <PolicyField label="Policy ID" value={form.policy_id} onChange={(value) => setForm((current) => ({ ...current, policy_id: value }))} />
           <PolicyField label="Name" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
@@ -171,11 +198,17 @@ export function PolicyViewer() {
           <div className="flex flex-wrap gap-2 lg:col-span-2 xl:col-span-4">
             <Button disabled={pendingAction === "save-policy"} onClick={() => void savePolicy()}>
               {pendingAction === "save-policy" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save Policy
+              {editingPolicyId ? "Save Policy Version" : "Save Policy"}
             </Button>
-            <Button variant="secondary" onClick={() => setForm(emptyForm)}>
-              New Policy
+            <Button variant="secondary" onClick={resetEditor}>
+              {editingPolicyId ? "Cancel Edit" : "New Policy"}
             </Button>
+            {editingPolicyId ? (
+              <Button variant="ghost" onClick={() => setPolicySearchText(editingPolicyId)}>
+                <Search className="h-4 w-4" />
+                Find In List
+              </Button>
+            ) : null}
           </div>
           <p className="text-sm text-muted lg:col-span-2 xl:col-span-4">{status}</p>
         </div>
@@ -185,56 +218,79 @@ export function PolicyViewer() {
         <div className="border-b border-border p-5">
           <h2 className="text-base font-semibold">Policy Precedence</h2>
           <p className="mt-1 text-sm text-muted">Higher priority policies win after DENY precedence is applied by the policy engine.</p>
+          <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center">
+            <label className="relative min-w-0 flex-1">
+              <span className="sr-only">Search Policies</span>
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+              <input
+                suppressHydrationWarning
+                value={policySearchText}
+                onChange={(event) => setPolicySearchText(event.target.value)}
+                placeholder="Search policies by name, ID, decision, condition, check, or approver"
+                className="h-10 w-full rounded-ui border border-border bg-background pl-9 pr-3 text-sm outline-none focus:border-accent"
+              />
+            </label>
+            <Button variant="secondary" disabled={!policySearchText} onClick={() => setPolicySearchText("")}>
+              <X className="h-4 w-4" />
+              Clear Search
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-muted">
+            Showing {filteredPolicies.length} of {policies.length} policies.
+          </p>
         </div>
         <div className="grid gap-0 divide-y divide-border">
-          {policies
-            .slice()
-            .sort((left, right) => right.priority - left.priority)
-            .map((policy) => (
-              <article key={policy.id} className="grid min-w-0 gap-4 p-5 xl:grid-cols-[minmax(180px,0.9fr)_minmax(150px,auto)_minmax(0,1.4fr)_auto] xl:items-start">
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold">{policy.name}</h3>
-                  <p className="mt-1 break-all font-mono text-xs text-muted">{policy.policy_id}</p>
-                  <p className="mt-1 font-mono text-xs text-muted">v{policy.version}</p>
-                </div>
-                <div className="flex min-w-0 flex-wrap gap-2 xl:justify-end">
-                  <StatusBadge kind="decision" value={policy.decision} />
-                  <StatusBadge kind="gate" value={policy.status ?? "active"} />
-                  <div className="font-mono text-xs text-muted">priority {policy.priority}</div>
-                </div>
-                <div className="min-w-0 text-sm leading-6 text-muted">
-                  <p className="break-words">{policy.reason}</p>
-                  <p className="mt-2 break-words font-mono text-xs">
-                    when: {stableJson(policy.when ?? recordFrom(policy.definition).when)}
-                    <br />
-                    checks: {listValue(policy.required_checks)}
-                    <br />
-                    approvers: {listValue(policy.approvers)}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2 xl:justify-end">
-                  <Button variant="secondary" onClick={() => editPolicy(policy)}>
-                    <CheckCircle2 className="h-4 w-4" />
-                    Edit
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={pendingAction === `enable:${policy.id}` || pendingAction === `disable:${policy.id}`}
-                    onClick={() => void togglePolicy(policy)}
-                  >
-                    {pendingAction === `enable:${policy.id}` || pendingAction === `disable:${policy.id}` ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : policy.status === "inactive" ? (
-                      <Power className="h-4 w-4" />
-                    ) : (
-                      <PowerOff className="h-4 w-4" />
-                    )}
-                    {policy.status === "inactive" ? "Enable" : "Disable"}
-                  </Button>
-                </div>
-              </article>
-            ))}
+          {filteredPolicies.map((policy) => (
+            <article
+              key={policy.id}
+              className="grid min-w-0 gap-4 p-5 xl:grid-cols-[minmax(180px,0.9fr)_minmax(150px,auto)_minmax(0,1.4fr)_auto] xl:items-start"
+            >
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold">{policy.name}</h3>
+                <p className="mt-1 break-all font-mono text-xs text-muted">{policy.policy_id}</p>
+                <p className="mt-1 font-mono text-xs text-muted">v{policy.version}</p>
+              </div>
+              <div className="flex min-w-0 flex-wrap gap-2 xl:justify-end">
+                <StatusBadge kind="decision" value={policy.decision} />
+                <StatusBadge kind="gate" value={policy.status ?? "active"} />
+                <div className="font-mono text-xs text-muted">priority {policy.priority}</div>
+              </div>
+              <div className="min-w-0 text-sm leading-6 text-muted">
+                <p className="break-words">{policy.reason}</p>
+                <p className="mt-2 break-words font-mono text-xs">
+                  when: {stableJson(policy.when ?? recordFrom(policy.definition).when)}
+                  <br />
+                  checks: {listValue(policy.required_checks)}
+                  <br />
+                  approvers: {listValue(policy.approvers)}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 xl:justify-end">
+                <Button variant="secondary" onClick={() => editPolicy(policy)}>
+                  <CheckCircle2 className="h-4 w-4" />
+                  {editingPolicyId === policy.policy_id ? "Editing" : "Edit"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={pendingAction === `enable:${policy.id}` || pendingAction === `disable:${policy.id}`}
+                  onClick={() => void togglePolicy(policy)}
+                >
+                  {pendingAction === `enable:${policy.id}` || pendingAction === `disable:${policy.id}` ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : policy.status === "inactive" ? (
+                    <Power className="h-4 w-4" />
+                  ) : (
+                    <PowerOff className="h-4 w-4" />
+                  )}
+                  {policy.status === "inactive" ? "Enable" : "Disable"}
+                </Button>
+              </div>
+            </article>
+          ))}
           {policies.length === 0 ? <div className="p-5 text-sm text-muted">No policies loaded yet. Run migration and seed before the demo.</div> : null}
+          {policies.length > 0 && filteredPolicies.length === 0 ? (
+            <div className="p-5 text-sm text-muted">No policies match the current search.</div>
+          ) : null}
         </div>
       </section>
     </div>
@@ -277,6 +333,26 @@ function recordFrom(value: unknown): Record<string, unknown> {
 
 function stringFrom(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function policySearchHaystack(policy: PolicyRecord) {
+  return [
+    policy.policy_id,
+    policy.name,
+    policy.status,
+    policy.version,
+    policy.version_status,
+    policy.decision,
+    String(policy.priority),
+    policy.reason,
+    stableJson(policy.when ?? recordFrom(policy.definition).when),
+    stableJson(policy.definition),
+    listValue(policy.required_checks),
+    listValue(policy.approvers)
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 }
 
 function stableJson(value: unknown) {

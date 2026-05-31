@@ -117,7 +117,10 @@ function derivedTestSchemaUrl(databaseUrl) {
 
 function prismaSetupUrl(databaseUrl) {
   const parsed = new URL(databaseUrl);
-  parsed.searchParams.set("statement_cache_size", "0");
+  parsed.searchParams.delete("pgbouncer");
+  parsed.searchParams.delete("connection_limit");
+  parsed.searchParams.delete("pool_timeout");
+  parsed.searchParams.delete("statement_cache_size");
   return parsed.toString();
 }
 

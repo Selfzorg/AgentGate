@@ -149,15 +149,20 @@ export async function getEvidenceMonitor(
     tenantId: string;
     workspaceId: string;
     limit?: number | undefined;
+    q?: string | undefined;
+    taskId?: string | undefined;
+    skillRunId?: string | undefined;
+    traceId?: string | undefined;
+    checkKey?: string | undefined;
+    status?: EvidenceTaskStatus | undefined;
+    runtime?: string | undefined;
   }
 ) {
+  const taskWhere = evidenceTaskWhere(input);
   const [statusCounts, workers, tasks, events] = await Promise.all([
     prisma.evidenceTask.groupBy({
       by: ["status"],
-      where: {
-        tenantId: input.tenantId,
-        workspaceId: input.workspaceId
-      },
+      where: taskWhere,
       _count: { _all: true }
     }),
     prisma.evidenceWorker.findMany({
@@ -169,10 +174,7 @@ export async function getEvidenceMonitor(
       take: 25
     }),
     prisma.evidenceTask.findMany({
-      where: {
-        tenantId: input.tenantId,
-        workspaceId: input.workspaceId
-      },
+      where: taskWhere,
       include: {
         approvalRequest: true,
         gateCheckResult: true,
@@ -193,7 +195,19 @@ export async function getEvidenceMonitor(
       where: {
         tenantId: input.tenantId,
         workspaceId: input.workspaceId,
-        eventType: { startsWith: "evidence." }
+        eventType: { startsWith: "evidence." },
+        ...(input.skillRunId ? { skillRunId: input.skillRunId } : {}),
+        ...(input.traceId ? { traceId: input.traceId } : {}),
+        ...(input.q
+          ? {
+              OR: [
+                { traceId: { contains: input.q, mode: "insensitive" } },
+                { skillRunId: { contains: input.q, mode: "insensitive" } },
+                { eventType: { contains: input.q, mode: "insensitive" } },
+                { actorId: { contains: input.q, mode: "insensitive" } }
+              ]
+            }
+          : {})
       },
       orderBy: [{ createdAt: "desc" }, { sequence: "desc" }],
       take: 40
@@ -218,6 +232,48 @@ export async function getEvidenceMonitor(
     workers: workers.map(serializeEvidenceWorker),
     tasks: tasks.map(serializeMonitorTask),
     events: events.map(serializeMonitorEvent)
+  };
+}
+
+function evidenceTaskWhere(input: {
+  tenantId: string;
+  workspaceId: string;
+  q?: string | undefined;
+  taskId?: string | undefined;
+  skillRunId?: string | undefined;
+  traceId?: string | undefined;
+  checkKey?: string | undefined;
+  status?: EvidenceTaskStatus | undefined;
+  runtime?: string | undefined;
+}): Prisma.EvidenceTaskWhereInput {
+  return {
+    tenantId: input.tenantId,
+    workspaceId: input.workspaceId,
+    ...(input.taskId ? { id: input.taskId } : {}),
+    ...(input.skillRunId ? { skillRunId: input.skillRunId } : {}),
+    ...(input.traceId ? { traceId: input.traceId } : {}),
+    ...(input.checkKey ? { checkKey: { contains: input.checkKey, mode: "insensitive" } } : {}),
+    ...(input.status ? { status: input.status } : {}),
+    ...(input.runtime ? { runtime: { contains: input.runtime, mode: "insensitive" } } : {}),
+    ...(input.q
+      ? {
+          OR: [
+            { id: { contains: input.q, mode: "insensitive" } },
+            { skillRunId: { contains: input.q, mode: "insensitive" } },
+            { traceId: { contains: input.q, mode: "insensitive" } },
+            { checkKey: { contains: input.q, mode: "insensitive" } },
+            { label: { contains: input.q, mode: "insensitive" } },
+            { runtime: { contains: input.q, mode: "insensitive" } },
+            {
+              skillRun: {
+                is: {
+                  rawAction: { contains: input.q, mode: "insensitive" }
+                }
+              }
+            }
+          ]
+        }
+      : {})
   };
 }
 

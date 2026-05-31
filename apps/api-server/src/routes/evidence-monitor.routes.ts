@@ -9,7 +9,14 @@ import {
 const monitorQuerySchema = z.object({
   tenant_id: z.string().default("tenant_demo"),
   workspace_id: z.string().default("workspace_demo"),
-  limit: z.coerce.number().int().positive().max(200).optional()
+  limit: z.coerce.number().int().positive().max(200).optional(),
+  q: z.string().trim().max(200).optional(),
+  task_id: z.string().trim().optional(),
+  run_id: z.string().trim().optional(),
+  trace_id: z.string().trim().optional(),
+  check_key: z.string().trim().optional(),
+  status: z.enum(["queued", "claimed", "running", "succeeded", "failed", "timed_out", "cancelled"]).optional(),
+  runtime: z.string().trim().optional()
 });
 
 const workerParamsSchema = z.object({
@@ -44,7 +51,14 @@ export const registerEvidenceMonitorRoutes: FastifyPluginAsync = async (app) => 
     return getEvidenceMonitor(app.services.prisma, {
       tenantId: query.tenant_id,
       workspaceId: query.workspace_id,
-      limit: query.limit
+      limit: query.limit,
+      q: query.q,
+      taskId: query.task_id,
+      skillRunId: query.run_id,
+      traceId: query.trace_id,
+      checkKey: query.check_key,
+      status: query.status,
+      runtime: query.runtime
     });
   });
 

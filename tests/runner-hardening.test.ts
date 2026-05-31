@@ -125,8 +125,18 @@ describe("PR4 runner failure, retry, and idempotency hardening", () => {
     });
     expect(afterFirstScan.status).toBe("completed");
     expect(afterFirstScan.skillRunAttempts).toHaveLength(1);
-    expect(afterFirstScan.executionLogs).toHaveLength(5);
+    expect(afterFirstScan.executionLogs.length).toBeGreaterThanOrEqual(5);
     expectStrictSequences(afterFirstScan.executionLogs.map((log) => log.sequence));
+    expect(afterFirstScan.executionLogs.map((log) => log.message)).toEqual(
+      expect.arrayContaining([
+        "Execution queue accepted.",
+        "Execution token consumed for queued run.",
+        "Runner claimed execution attempt.",
+        "Execution controls validated.",
+        "Connector selected.",
+        "Connector input validation passed."
+      ])
+    );
 
     await processQueuedRunById({ prisma, runId: decision.run_id });
     const afterSecondScan = await prisma.skillRun.findUniqueOrThrow({
@@ -139,7 +149,7 @@ describe("PR4 runner failure, retry, and idempotency hardening", () => {
       }
     });
     expect(afterSecondScan.skillRunAttempts).toHaveLength(1);
-    expect(afterSecondScan.executionLogs).toHaveLength(5);
+    expect(afterSecondScan.executionLogs).toHaveLength(afterFirstScan.executionLogs.length);
     expectStrictSequences(afterSecondScan.executionLogs.map((log) => log.sequence));
 
     const detail = await app.inject({

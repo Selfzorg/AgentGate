@@ -61,6 +61,65 @@ export type ExecutionAttemptRecord = {
   created_at: string;
 };
 
+export type SkillRunListRecord = {
+  id: string;
+  trace_id: string;
+  created_at: string;
+  updated_at: string;
+  agent: {
+    id: string;
+    role: string;
+    display_name: string;
+  } | null;
+  source: string;
+  adapter_type: string;
+  raw_action: string;
+  skill_id: string | null;
+  environment: string | null;
+  risk_level: "low" | "medium" | "high" | "critical" | null;
+  risk_score: number | null;
+  decision: DecisionResponse["decision"] | null;
+  status: string;
+  reason: string | null;
+  matched_policy_id: string | null;
+  approval: {
+    id: string;
+    status: ApprovalRecord["status"];
+    approval_readiness: ApprovalRecord["approval_readiness"];
+    updated_at: string;
+  } | null;
+  counts: {
+    approvals: number;
+    gate_checks: number;
+    evidence_tasks: number;
+    execution_logs: number;
+    audit_events: number;
+    execution_tokens: number;
+    attempts: number;
+  };
+  gate_check_summary: {
+    total: number;
+    passed: number;
+    running: number;
+    pending: number;
+    missing: number;
+    failed: number;
+    unknown: number;
+  };
+  no_gate_check_reason: string | null;
+  latest_audit_event: {
+    id: string;
+    event_type: string;
+    sequence: number | null;
+    created_at: string;
+  } | null;
+  next_action: string;
+};
+
+export type SkillRunListResponse = {
+  skill_runs: SkillRunListRecord[];
+};
+
 export type SkillRunDetailResponse = {
   skill_run: {
     id: string;

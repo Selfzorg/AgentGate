@@ -47,9 +47,79 @@ export async function listPendingEvidenceTasks({
 }
 
 export async function getEvidenceTask(prisma: PrismaClient, taskId: string) {
-  const task = await prisma.evidenceTask.findUnique({ where: { id: taskId } });
+  const task = await prisma.evidenceTask.findUnique({
+    where: { id: taskId },
+    include: {
+      approvalRequest: true,
+      gateCheckResult: true,
+      skillRun: {
+        include: {
+          skill: true,
+          matchedPolicy: true
+        }
+      }
+    }
+  });
   if (!task) return { status: 404 as const, body: { error: "Evidence task not found" } };
-  return { status: 200 as const, body: { evidence_task: serializeEvidenceTask(task) } };
+  const events = await prisma.auditEvent.findMany({
+    where: {
+      traceId: task.traceId,
+      OR: [
+        { eventType: { startsWith: "evidence." } },
+        { eventType: { startsWith: "approval." } },
+        { eventType: { startsWith: "dry_run." } }
+      ]
+    },
+    orderBy: [{ createdAt: "desc" }, { sequence: "desc" }],
+    take: 40
+  });
+
+  return {
+    status: 200 as const,
+    body: {
+      evidence_task: {
+        ...serializeEvidenceTask(task),
+        gate_check: {
+          id: task.gateCheckResult.id,
+          check_key: task.gateCheckResult.checkKey,
+          label: task.gateCheckResult.label,
+          status: task.gateCheckResult.status,
+          evidence: task.gateCheckResult.evidence
+        },
+        approval: task.approvalRequest
+          ? {
+              id: task.approvalRequest.id,
+              status: task.approvalRequest.status,
+              approval_readiness: task.approvalRequest.approvalReadiness,
+              updated_at: task.approvalRequest.updatedAt.toISOString()
+            }
+          : null,
+        skill_run: {
+          id: task.skillRun.id,
+          trace_id: task.skillRun.traceId,
+          raw_action: task.skillRun.rawAction,
+          status: task.skillRun.status,
+          decision: task.skillRun.decision,
+          risk_level: task.skillRun.riskLevel,
+          environment: task.skillRun.environment,
+          skill_id: task.skillRun.skill?.skillId ?? null,
+          skill_name: task.skillRun.skill?.name ?? null,
+          matched_policy_id: task.skillRun.matchedPolicy?.policyId ?? null
+        },
+        audit_events: events.map((event) => ({
+          id: event.id,
+          skill_run_id: event.skillRunId,
+          trace_id: event.traceId,
+          event_type: event.eventType,
+          actor_type: event.actorType,
+          actor_id: event.actorId,
+          sequence: event.sequence,
+          metadata: event.metadata,
+          created_at: event.createdAt.toISOString()
+        }))
+      }
+    }
+  };
 }
 
 export async function claimEvidenceTask(

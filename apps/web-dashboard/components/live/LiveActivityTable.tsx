@@ -113,7 +113,7 @@ export function LiveActivityTable() {
                           onClick={() => void handleDryRun(activity.run_id)}
                         >
                           <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
-                          {dryRunPending === activity.run_id ? "Running" : "Dry-Run"}
+                          {dryRunPending === activity.run_id ? "Running Dry-Run" : "Start Dry-Run"}
                         </Button>
                       ) : null}
                     </div>
