@@ -1,4 +1,5 @@
 import { ArrowRight, CheckCircle2, GitBranch, KeyRound, RadioTower, ScrollText, ShieldCheck, Sparkles, Workflow } from "lucide-react";
+import { TraceFieldScene } from "@/components/home/TraceFieldScene";
 
 const runTiles = [
   {
@@ -79,8 +80,10 @@ const processSteps = [
 
 export default function OverviewPage() {
   return (
-    <div className="relative left-1/2 min-h-[100dvh] w-screen -translate-x-1/2 bg-[#060807] text-white">
-      <section className="mx-auto grid max-w-7xl gap-12 px-6 pb-24 pt-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(360px,0.72fr)] lg:items-start">
+    <div className="relative left-1/2 min-h-[100dvh] w-screen -translate-x-1/2 overflow-hidden bg-[#050806] text-white">
+      <TraceFieldScene />
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[900px] bg-[linear-gradient(180deg,rgb(5_8_6_/_0.04),rgb(5_8_6_/_0.72)_62%,rgb(5_8_6_/_1))]" />
+      <section className="relative z-10 mx-auto grid max-w-7xl gap-12 px-6 pb-24 pt-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(360px,0.72fr)] lg:items-start">
         <div className="pt-8 lg:pt-14">
           <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.15] bg-white/[0.08] px-3 py-1 text-[11px] font-semibold uppercase text-emerald-100">
             <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
@@ -110,7 +113,7 @@ export default function OverviewPage() {
           </div>
         </div>
 
-        <div className="relative min-h-[560px] overflow-hidden rounded-[28px] border border-white/[0.12] bg-[#0c1110] p-5 shadow-[0_30px_120px_rgb(0_0_0_/_.48)]">
+        <div className="relative min-h-[560px] overflow-hidden rounded-[28px] border border-white/[0.12] bg-[#0c1110]/90 p-5 shadow-[0_30px_120px_rgb(0_0_0_/_.48)] backdrop-blur">
           <div className="absolute inset-x-0 top-0 h-32 bg-[linear-gradient(180deg,rgb(16_185_129_/_0.18),transparent)]" />
           <div className="relative flex items-center justify-between">
             <div>
@@ -165,7 +168,7 @@ export default function OverviewPage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-6 pb-24">
+      <section className="relative z-10 mx-auto max-w-7xl px-6 pb-24">
         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h2 className="text-3xl font-semibold tracking-normal md:text-5xl">Run Gallery</h2>
@@ -197,7 +200,7 @@ export default function OverviewPage() {
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-10 px-6 pb-24 lg:grid-cols-[0.9fr_1.1fr]">
+      <section className="relative z-10 mx-auto grid max-w-7xl gap-10 px-6 pb-24 lg:grid-cols-[0.9fr_1.1fr]">
         <div>
           <h2 className="max-w-lg text-4xl font-semibold leading-none tracking-normal md:text-6xl">The approval architecture.</h2>
           <p className="mt-5 max-w-md text-sm leading-6 text-white/[0.58]">The product is built around one durable story per agent action, from first policy decision to final execution log.</p>
@@ -217,7 +220,7 @@ export default function OverviewPage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-6 pb-20">
+      <section className="relative z-10 mx-auto max-w-7xl px-6 pb-20">
         <h2 className="text-3xl font-semibold tracking-normal md:text-5xl">Control Archives</h2>
         <div className="mt-8 grid gap-4 lg:grid-cols-3">
           {archiveTiles.map((tile) => {
@@ -237,7 +240,7 @@ export default function OverviewPage() {
         </div>
       </section>
 
-      <section className="mx-auto flex max-w-7xl flex-col gap-4 border-t border-white/[0.12] px-6 py-8 text-sm text-white/[0.48] md:flex-row md:items-center md:justify-between">
+      <section className="relative z-10 mx-auto flex max-w-7xl flex-col gap-4 border-t border-white/[0.12] px-6 py-8 text-sm text-white/[0.48] md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-emerald-200" aria-hidden="true" />
           AgentGate

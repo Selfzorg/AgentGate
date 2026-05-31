@@ -3,24 +3,46 @@
 @tailwind utilities;
 
 :root {
-  --background: 220 20% 98%;
-  --foreground: 224 32% 12%;
-  --surface: 0 0% 100%;
-  --muted: 220 10% 43%;
-  --border: 220 13% 88%;
-  --accent: 168 68% 34%;
-  --danger: 0 68% 48%;
-  --warning: 38 92% 50%;
-  --success: 145 63% 37%;
-  --radius-ui: 0.5rem;
+  --background: 150 18% 4%;
+  --foreground: 150 24% 96%;
+  --surface: 154 18% 8%;
+  --muted: 150 8% 66%;
+  --border: 150 14% 18%;
+  --accent: 153 67% 52%;
+  --danger: 0 76% 64%;
+  --warning: 39 92% 60%;
+  --success: 145 62% 50%;
+  --radius-ui: 0.55rem;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  background: #050806;
+}
+
 body {
   margin: 0;
   background: hsl(var(--background));
+  color: hsl(var(--foreground));
   overflow-x: hidden;
+  color-scheme: dark;
+  text-rendering: geometricPrecision;
+}
+
+::selection {
+  background: hsl(var(--accent) / 0.28);
+  color: hsl(var(--foreground));
+}
+
+input,
+textarea,
+select {
+  color-scheme: dark;
+}
+
+* {
+  scrollbar-color: hsl(var(--border)) hsl(var(--background));
 }

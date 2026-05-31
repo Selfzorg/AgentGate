@@ -19,7 +19,7 @@ const config: Config = {
         ui: "var(--radius-ui)"
       },
       boxShadow: {
-        panel: "0 1px 2px hsl(220 30% 12% / 0.06), 0 12px 32px hsl(220 30% 12% / 0.08)"
+        panel: "0 1px 0 hsl(150 24% 100% / 0.05), 0 18px 60px hsl(0 0% 0% / 0.3)"
       }
     }
   },
