@@ -51,6 +51,11 @@ export function createDecisionService({
       const traceId = createId("trc");
       const runId = createId("run");
 
+      const staticResolvedSkill = resolveSkill({
+        rawAction: request.raw_action,
+        toolName: request.tool.tool_name,
+        context: request.context
+      });
       const importedResolution = await resolveImportedRegistrySkill(prisma, {
         tenantId: request.tenant_id,
         workspaceId: request.workspace_id,
@@ -59,16 +64,13 @@ export function createDecisionService({
         source: request.source,
         context: request.context
       });
-      const baseResolvedSkill = importedResolution.resolvedSkill ?? resolveSkill({
-        rawAction: request.raw_action,
-        toolName: request.tool.tool_name,
-        context: request.context
-      });
-      const resolvedSkill = await hydrateResolvedSkillFromActiveVersion(prisma, {
+      const baseResolvedSkill = importedResolution.resolvedSkill ?? staticResolvedSkill;
+      const hydratedResolvedSkill = await hydrateResolvedSkillFromActiveVersion(prisma, {
         tenantId: request.tenant_id,
         workspaceId: request.workspace_id,
         resolvedSkill: baseResolvedSkill
       });
+      const resolvedSkill = mergeCanonicalPolicyAlias(hydratedResolvedSkill, staticResolvedSkill);
 
       const risk = scoreRisk({
         resolvedSkill,
@@ -328,6 +330,21 @@ function checkIsSatisfied(check: string, context: Record<string, unknown>): bool
   if (check === "schema_diff_generated") return context.schema_diff_generated === true;
   if (check === "backup_exists") return context.backup_exists === true;
   return false;
+}
+
+function mergeCanonicalPolicyAlias(resolvedSkill: ReturnType<typeof resolveSkill>, staticResolvedSkill: ReturnType<typeof resolveSkill>) {
+  if (resolvedSkill.skill_id === staticResolvedSkill.skill_id || staticResolvedSkill.skill_id === "unknown") {
+    return resolvedSkill;
+  }
+
+  return {
+    ...resolvedSkill,
+    policy_aliases: uniqueStrings([staticResolvedSkill.skill_id, ...(resolvedSkill.policy_aliases ?? [])])
+  };
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function auditEventData(

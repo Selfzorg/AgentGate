@@ -1,8 +1,10 @@
 import type { AuditEventRecord, AuditIntegrityRecord, PolicyRecord } from "./api-types";
 import { apiBaseUrl } from "./api-config";
 
-export async function getPolicies(): Promise<{ policies: PolicyRecord[] }> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/policies`, {
+export async function getPolicies(options: { includeInactive?: boolean } = {}): Promise<{ policies: PolicyRecord[] }> {
+  const params = new URLSearchParams();
+  if (options.includeInactive) params.set("include_inactive", "true");
+  const response = await fetch(`${apiBaseUrl}/api/v1/policies${params.size > 0 ? `?${params.toString()}` : ""}`, {
     cache: "no-store"
   });
 
@@ -11,6 +13,45 @@ export async function getPolicies(): Promise<{ policies: PolicyRecord[] }> {
   }
 
   return (await response.json()) as { policies: PolicyRecord[] };
+}
+
+export type PolicyEditorInput = {
+  policy_id: string;
+  name: string;
+  priority: number;
+  decision: PolicyRecord["decision"];
+  reason: string;
+  when: Record<string, unknown>;
+  required_checks?: string[];
+  approvers?: string[];
+};
+
+export async function upsertPolicy(input: PolicyEditorInput): Promise<{ policy: PolicyRecord; warnings?: string[] }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/policies`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as { policy: PolicyRecord; warnings?: string[] };
+}
+
+export async function setPolicyStatus(policyId: string, status: "enable" | "disable"): Promise<{ policy: PolicyRecord }> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/policies/${encodeURIComponent(policyId)}/${status}`, {
+    method: "POST",
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as { policy: PolicyRecord };
 }
 
 export async function getAuditEventsByTrace(traceId: string): Promise<{ audit_events: AuditEventRecord[] }> {

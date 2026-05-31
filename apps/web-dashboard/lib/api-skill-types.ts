@@ -14,6 +14,8 @@ export type SkillRecord = {
   config: Record<string, unknown>;
   execution: Record<string, unknown>;
   evidence_tasks?: EvidenceTaskSpec[];
+  policy_aliases?: string[];
+  matched_policies?: PolicyRecord[];
 };
 
 export type EvidenceTaskSpec = {
@@ -123,13 +125,22 @@ export type SkillRegistryScan = {
 
 export type PolicyRecord = {
   id: string;
+  tenant_id?: string;
+  workspace_id?: string;
   policy_id: string;
   name: string;
+  status?: string;
   version: string;
+  version_status?: string;
   priority: number;
   decision: DecisionResponse["decision"];
   reason: string;
   definition: Record<string, unknown>;
+  when?: Record<string, unknown>;
   required_checks: unknown;
   approvers: unknown;
+  created_at?: string;
+  updated_at?: string;
+  version_created_at?: string | null;
+  version_updated_at?: string | null;
 };

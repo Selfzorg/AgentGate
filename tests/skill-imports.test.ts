@@ -279,6 +279,367 @@ describe("AgentGate skill import recovery scope", () => {
     });
   });
 
+  it("keeps imported MCP drop-table tools bound to the canonical deny policy", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createMcpFixtures(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+        const candidates = importResponse.json().import_batch.candidates as Array<{
+          candidate_id: string;
+          name: string;
+          inferred_policy_aliases: string[];
+        }>;
+        const dropTableCandidates = candidates.filter((entry) => entry.name === "mcp.agentgate.agentgate_drop_table");
+        expect(dropTableCandidates.length).toBeGreaterThan(0);
+        expect(dropTableCandidates.every((entry) => entry.inferred_policy_aliases.length === 1 && entry.inferred_policy_aliases[0] === "drop-table")).toBe(true);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["db_owner"],
+            approver_roles: ["db_owner"],
+            candidate_reviews: dropTableCandidates.map((candidate) => ({
+              candidate_id: candidate.candidate_id,
+              policy_aliases: ["run-db-migration"]
+            }))
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const decision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            source: "mcp_proxy",
+            adapter_type: "mcp_proxy",
+            agent: {
+              agent_id: "agent_db_001",
+              agent_type: "mcp_client",
+              role: "db_agent"
+            },
+            tool: {
+              tool_name: "mcp.postgres.drop_table"
+            },
+            raw_action: 'mcp.postgres.drop_table({"table":"users","database":"prod-main","environment":"production"})',
+            context: {
+              repo: "agentgate",
+              database: "prod-main",
+              environment: "production"
+            }
+          }
+        });
+
+        expect(decision.statusCode).toBe(200);
+        const body = decision.json();
+        expect(body.decision).toBe("DENY");
+        expect(body.skill_id).toContain("agentgate-drop-table");
+        const run = await prisma.skillRun.findUniqueOrThrow({
+          where: { id: body.run_id }
+        });
+        expect(run.matchedPolicyRecordId).toBeNull();
+        expect(run.policySnapshot).toMatchObject({
+          matched_policy_id: "mcp_drop_table_denied",
+          policy_decision: "DENY"
+        });
+        expect(run.resolvedSkillSnapshot).toMatchObject({
+          policy_aliases: ["drop-table", "run-db-migration"]
+        });
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  it("creates versioned UI policies and attaches them to imported skills through policy aliases", async () => {
+    await withTempWorkspace(async (workspace) => {
+      await createRefundMoneyCommand(workspace);
+      const tenantId = createdTenantIds.at(-1)!;
+      const workspaceId = workspaceIdForTenant(tenantId);
+      const app = await createApp({ prisma, logger: false });
+      try {
+        const importResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/registry/import",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            root_dir: workspace
+          }
+        });
+        expect(importResponse.statusCode).toBe(201);
+
+        const approveResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/registry/import-batches/${importResponse.json().import_batch.id}/approve`,
+          payload: {
+            owners: ["support-team"],
+            approver_roles: ["finance-owner"]
+          }
+        });
+        expect(approveResponse.statusCode).toBe(200);
+
+        const importedSkill = await prisma.skill.findFirstOrThrow({
+          where: {
+            tenantId,
+            workspaceId,
+            skillId: "claude_command:repo:claude-commands-ecommerce-refund-money"
+          },
+          include: {
+            versions: {
+              orderBy: { createdAt: "desc" }
+            }
+          }
+        });
+        const originalVersion = importedSkill.versions.find((version) => version.status === "active")!;
+
+        const policyResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/policies",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            policy_id: "refund_prod_denied",
+            name: "Refund production denied",
+            priority: 200,
+            when: {
+              skill: "refund-money",
+              environment: "production"
+            },
+            decision: "DENY",
+            reason: "Production refunds must be blocked for this test."
+          }
+        });
+        expect(policyResponse.statusCode).toBe(201);
+        expect(policyResponse.json().policy.when).toEqual({
+          skill: "refund-money",
+          environment: "production"
+        });
+
+        const bindingResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/skills/${encodeURIComponent(importedSkill.id)}/policy-bindings`,
+          payload: {
+            policy_aliases: ["refund-money"]
+          }
+        });
+        expect(bindingResponse.statusCode).toBe(201);
+        expect(bindingResponse.json().warnings).toEqual([]);
+        expect(bindingResponse.json().skill_version.policy_aliases).toEqual(["refund-money"]);
+        expect(bindingResponse.json().skill_version.matched_policies).toEqual([
+          expect.objectContaining({
+            policy_id: "refund_prod_denied",
+            decision: "DENY"
+          })
+        ]);
+
+        const versionsAfterBinding = await prisma.skillVersion.findMany({
+          where: {
+            skillRecordId: importedSkill.id
+          },
+          orderBy: { createdAt: "asc" }
+        });
+        expect(versionsAfterBinding.find((version) => version.id === originalVersion.id)?.status).toBe("inactive");
+        const activePolicyBindingVersion = versionsAfterBinding.find((version) => version.status === "active")!;
+        expect((activePolicyBindingVersion.config as Record<string, unknown>).policy_aliases).toEqual(["refund-money"]);
+        expect((activePolicyBindingVersion.config as Record<string, unknown>).policy_review).toMatchObject({
+          policy_aliases: ["refund-money"],
+          matched_policy_ids: ["refund_prod_denied"]
+        });
+
+        const noopBindingResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/skills/${encodeURIComponent(importedSkill.id)}/policy-bindings`,
+          payload: {
+            policy_aliases: ["refund-money"]
+          }
+        });
+        expect(noopBindingResponse.statusCode).toBe(200);
+        expect(noopBindingResponse.json().noop).toBe(true);
+        expect(await prisma.skillVersion.count({ where: { skillRecordId: importedSkill.id } })).toBe(versionsAfterBinding.length);
+
+        const listedSkills = await app.inject({
+          method: "GET",
+          url: "/api/v1/skills?include_inactive=true"
+        });
+        expect(listedSkills.statusCode).toBe(200);
+        const listedSkill = listedSkills.json().skills.find((skill: { id: string }) => skill.id === importedSkill.id);
+        expect(listedSkill.policy_aliases).toEqual(["refund-money"]);
+        expect(listedSkill.matched_policies).toEqual([
+          expect.objectContaining({
+            policy_id: "refund_prod_denied",
+            decision: "DENY"
+          })
+        ]);
+
+        const deniedDecision = await app.inject({
+          method: "POST",
+          url: "/api/v1/decision",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            source: "claude-code",
+            adapter_type: "hook",
+            agent: {
+              agent_id: "claude_refund_policy_test",
+              agent_type: "claude_code",
+              role: "release_agent"
+            },
+            tool: {
+              tool_name: "Bash"
+            },
+            raw_action: "refund money using refund-money",
+            context: {
+              environment: "production",
+              requested_skill: "refund-money"
+            }
+          }
+        });
+        expect(deniedDecision.statusCode).toBe(200);
+        expect(deniedDecision.json()).toMatchObject({
+          decision: "DENY",
+          skill_id: "claude_command:repo:claude-commands-ecommerce-refund-money"
+        });
+        const deniedRun = await prisma.skillRun.findUniqueOrThrow({
+          where: { id: deniedDecision.json().run_id }
+        });
+        expect(deniedRun.matchedPolicyRecordId).toBe(policyResponse.json().policy.id);
+        expect(deniedRun.policySnapshot).toMatchObject({
+          matched_policy_id: "refund_prod_denied",
+          policy_decision: "DENY"
+        });
+
+        const editedPolicyResponse = await app.inject({
+          method: "POST",
+          url: "/api/v1/policies",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            policy_id: "refund_prod_denied",
+            name: "Refund production requires approval",
+            priority: 200,
+            when: {
+              skill: "refund-money",
+              environment: "production"
+            },
+            decision: "REQUIRE_APPROVAL",
+            reason: "Production refunds require finance approval.",
+            required_checks: ["customer_file_not_empty"],
+            approvers: ["finance-owner"]
+          }
+        });
+        expect(editedPolicyResponse.statusCode).toBe(201);
+        expect(editedPolicyResponse.json().policy.decision).toBe("REQUIRE_APPROVAL");
+        const policyVersions = await prisma.policyVersion.findMany({
+          where: {
+            policyRecordId: policyResponse.json().policy.id
+          }
+        });
+        expect(policyVersions).toHaveLength(2);
+        expect(policyVersions.filter((version) => version.status === "active")).toHaveLength(1);
+
+        const disabledPolicyResponse = await app.inject({
+          method: "POST",
+          url: `/api/v1/policies/refund_prod_denied/disable?tenant_id=${tenantId}&workspace_id=${workspaceId}`
+        });
+        expect(disabledPolicyResponse.statusCode).toBe(200);
+        expect(disabledPolicyResponse.json().policy.status).toBe("inactive");
+
+        const activePolicies = await app.inject({
+          method: "GET",
+          url: `/api/v1/policies?tenant_id=${tenantId}&workspace_id=${workspaceId}`
+        });
+        expect(activePolicies.statusCode).toBe(200);
+        expect(activePolicies.json().policies.map((policy: { policy_id: string }) => policy.policy_id)).not.toContain("refund_prod_denied");
+
+        const auditEvents = await prisma.auditEvent.findMany({
+          where: {
+            tenantId,
+            workspaceId,
+            eventType: {
+              in: ["skill.policy_bindings.updated", "policy.updated", "policy.disabled"]
+            }
+          }
+        });
+        expect(auditEvents.map((event) => event.eventType)).toEqual(
+          expect.arrayContaining(["skill.policy_bindings.updated", "policy.updated", "policy.disabled"])
+        );
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  it("reports active policy conflicts for UI-created rules with the same condition", async () => {
+    const tenantId = createdTenantIds.at(-1)!;
+    const workspaceId = workspaceIdForTenant(tenantId);
+    const app = await createApp({ prisma, logger: false });
+    try {
+      for (const rule of [
+        {
+          policy_id: "refund_conflict_deny",
+          name: "Refund conflict deny",
+          decision: "DENY"
+        },
+        {
+          policy_id: "refund_conflict_approval",
+          name: "Refund conflict approval",
+          decision: "REQUIRE_APPROVAL"
+        }
+      ]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/v1/policies",
+          payload: {
+            tenant_id: tenantId,
+            workspace_id: workspaceId,
+            policy_id: rule.policy_id,
+            name: rule.name,
+            priority: 100,
+            when: {
+              skill: "refund-money",
+              environment: "production"
+            },
+            decision: rule.decision,
+            reason: `${rule.name} test rule.`
+          }
+        });
+        expect(response.statusCode).toBe(201);
+      }
+
+      const conflictsResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/policies/conflicts?tenant_id=${tenantId}&workspace_id=${workspaceId}`
+      });
+      expect(conflictsResponse.statusCode).toBe(200);
+      expect(conflictsResponse.json().conflicts).toEqual([
+        expect.objectContaining({
+          severity: "conflict",
+          policies: expect.arrayContaining([
+            expect.objectContaining({ policy_id: "refund_conflict_deny" }),
+            expect.objectContaining({ policy_id: "refund_conflict_approval" })
+          ])
+        })
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("imports structured evidence tasks and uses them when queueing evidence", async () => {
     await withTempWorkspace(async (workspace) => {
       await createRefundMoneyCommand(workspace);
@@ -443,9 +804,17 @@ describe("AgentGate skill import recovery scope", () => {
         });
         expect(approveResponse.statusCode).toBe(200);
 
+        const importedSkill = await prisma.skill.findFirstOrThrow({
+          where: {
+            tenantId,
+            workspaceId,
+            skillId: "claude_command:repo:claude-commands-ecommerce-refund-money"
+          }
+        });
+
         const updateResponse = await app.inject({
           method: "POST",
-          url: `/api/v1/skills/${encodeURIComponent("claude_command:repo:claude-commands-ecommerce-refund-money")}/evidence-tasks`,
+          url: `/api/v1/skills/${encodeURIComponent(importedSkill.id)}/evidence-tasks`,
           payload: {
             evidence_tasks: [
               {

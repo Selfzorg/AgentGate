@@ -101,6 +101,9 @@ describe("web dashboard page regressions", () => {
     expect(skillsRegistry).toContain("Approve Selected");
     expect(skillsRegistry).toContain("Expected Evidence Tasks");
     expect(skillsRegistry).toContain("updateSkillEvidenceTasks");
+    expect(skillsRegistry).toContain("Policy Bindings");
+    expect(skillsRegistry).toContain("updateSkillPolicyBindings");
+    expect(skillsRegistry).toContain("matched_policies");
     expect(skillsRegistry).toContain("What It Does");
     expect(skillsRegistry).toContain("evidenceCheckOptionsFromSkills");
     expect(skillsRegistry).toContain("evidence_skill_id");
@@ -125,5 +128,25 @@ describe("web dashboard page regressions", () => {
     expect(executionConsole).toContain("<ExecutionNextStep");
     expect(executionFlow).toContain("Next: continue in Claude");
     expect(executionFlow).toContain("Claude completion callback");
+  });
+
+  it("keeps the policies page wired to the versioned policy editor API", async () => {
+    const policyViewer = await readProjectFile("apps/web-dashboard/components/policies/PolicyViewer.tsx");
+    const policyRequests = await readProjectFile("apps/web-dashboard/lib/api-policy-audit-requests.ts");
+
+    expect(policyViewer).toContain("Policy Editor");
+    expect(policyViewer).toContain("when.skill");
+    expect(policyViewer).toContain("dry_run_completed");
+    expect(policyViewer).toContain("upsertPolicy");
+    expect(policyViewer).toContain("setPolicyStatus");
+    expect(policyViewer).toContain("suppressHydrationWarning");
+    expect(policyViewer).toContain("Save Policy");
+    expect(policyViewer).toContain("Enable");
+    expect(policyViewer).toContain("Disable");
+
+    expect(policyRequests).toContain("POST");
+    expect(policyRequests).toContain("/api/v1/policies");
+    expect(policyRequests).toContain('status: "enable" | "disable"');
+    expect(policyRequests).toContain("${encodeURIComponent(policyId)}/${status}");
   });
 });

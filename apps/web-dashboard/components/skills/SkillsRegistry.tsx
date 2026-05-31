@@ -5,13 +5,16 @@ import { CheckCircle2, Loader2, Power, PowerOff, RefreshCw, Search, UploadCloud,
 import {
   approveSkillImportBatch,
   createSkillImport,
+  getPolicies,
   getSkills,
   rejectSkillImportBatch,
   scanSkillRegistry,
   setSkillVersionStatus,
   updateSkillEvidenceTasks,
+  updateSkillPolicyBindings,
   type EvidenceTaskSpec,
   type SkillImportBatch,
+  type PolicyRecord,
   type SkillRecord,
   type SkillRegistryScan
 } from "@/lib/api-client";
@@ -37,6 +40,7 @@ import { ImportNextStep, ImportStepRail, Metric, SourcePill, splitCsv } from "./
 
 export function SkillsRegistry() {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
+  const [policies, setPolicies] = useState<PolicyRecord[]>([]);
   const [scan, setScan] = useState<SkillRegistryScan | null>(null);
   const [batch, setBatch] = useState<SkillImportBatch | null>(null);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
@@ -54,6 +58,8 @@ export function SkillsRegistry() {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
   const [skillEvidenceDrafts, setSkillEvidenceDrafts] = useState<Record<string, EvidenceTaskSpec[]>>({});
+  const [editingPolicySkillId, setEditingPolicySkillId] = useState<string | null>(null);
+  const [skillPolicyDrafts, setSkillPolicyDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void loadSkills();
@@ -111,6 +117,13 @@ export function SkillsRegistry() {
   const sourceOptions = [...new Set(candidates.map((candidate) => candidate.source_type))].sort();
   const evidenceOptions = useMemo(() => evidenceCheckOptionsFromSkills(skills), [skills]);
   const evidenceSkillOptions = useMemo(() => evidenceSkillOptionsFromSkills(skills), [skills]);
+  const policyTargets = useMemo(() => {
+    const targets = policies
+      .filter((policy) => policy.status !== "inactive")
+      .flatMap((policy) => policyTargetKeys(policy))
+      .filter(Boolean);
+    return [...new Set(targets)].sort();
+  }, [policies]);
   const selectedCount = selectedCandidateIds.length;
   const importStage = batch
     ? batch.status === "approved"
@@ -124,9 +137,10 @@ export function SkillsRegistry() {
 
   async function loadSkills() {
     try {
-      const response = await getSkills({ includeInactive: true });
-      setSkills(response.skills);
-      setStatus(`${response.skills.length} skills loaded.`);
+      const [skillResponse, policyResponse] = await Promise.all([getSkills({ includeInactive: true }), getPolicies({ includeInactive: true })]);
+      setSkills(skillResponse.skills);
+      setPolicies(policyResponse.policies);
+      setStatus(`${skillResponse.skills.length} skills and ${policyResponse.policies.length} policies loaded.`);
     } catch {
       setStatus("API unavailable.");
     }
@@ -313,6 +327,30 @@ export function SkillsRegistry() {
       await loadSkills();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Evidence task update failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  function startSkillPolicyEdit(skill: SkillRecord) {
+    setEditingPolicySkillId(skill.id);
+    setSkillPolicyDrafts((drafts) => ({
+      ...drafts,
+      [skill.id]: (skill.policy_aliases ?? []).join(", ")
+    }));
+  }
+
+  async function saveSkillPolicyBindings(skill: SkillRecord) {
+    setPendingAction(`policy:${skill.id}`);
+    try {
+      const response = await updateSkillPolicyBindings(skill.skill_id, splitCsv(skillPolicyDrafts[skill.id] ?? ""));
+      const suffix = response.noop ? "No new version was needed." : "A new active skill version was created.";
+      const warningText = response.warnings?.length ? ` Warnings: ${response.warnings.join(" ")}` : "";
+      setStatus(`Policy bindings updated for ${skill.skill_id}. ${suffix}${warningText}`);
+      setEditingPolicySkillId(null);
+      await loadSkills();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Policy binding update failed.");
     } finally {
       setPendingAction(null);
     }
@@ -579,6 +617,70 @@ export function SkillsRegistry() {
                     <div>
                       <div className="text-xs font-semibold uppercase text-muted">What It Does</div>
                       <p className="mt-1 text-sm leading-6 text-muted">{skillWhatItDoes(skill)}</p>
+                      <div className="mt-4 rounded-ui border border-border p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-xs font-semibold uppercase text-muted">Policy Bindings</div>
+                            <div className="mt-1 text-[11px] text-muted">Aliases connect this skill to policy when.skill targets.</div>
+                          </div>
+                          {editingPolicySkillId === skill.id ? (
+                            <div className="flex items-center gap-2">
+                              <Button variant="secondary" disabled={pendingAction === `policy:${skill.id}`} onClick={() => setEditingPolicySkillId(null)}>
+                                Cancel
+                              </Button>
+                              <Button disabled={pendingAction === `policy:${skill.id}`} onClick={() => void saveSkillPolicyBindings(skill)}>
+                                {pendingAction === `policy:${skill.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                                Save Policy
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button variant="secondary" disabled={pendingAction !== null} onClick={() => startSkillPolicyEdit(skill)}>
+                              Edit Policy
+                            </Button>
+                          )}
+                        </div>
+                        {editingPolicySkillId === skill.id ? (
+                          <label className="mt-3 block">
+                            <span className="text-[10px] font-semibold uppercase text-muted">Policy Aliases</span>
+                            <input
+                              suppressHydrationWarning
+                              value={skillPolicyDrafts[skill.id] ?? ""}
+                              list={`policy-targets-${safeDomId(skill.id)}`}
+                              placeholder="deploy-production, drop-table"
+                              onChange={(event) => setSkillPolicyDrafts((drafts) => ({ ...drafts, [skill.id]: event.target.value }))}
+                              className="mt-1 w-full rounded-ui border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
+                            />
+                            <datalist id={`policy-targets-${safeDomId(skill.id)}`}>
+                              {policyTargets.map((target) => (
+                                <option key={target} value={target} />
+                              ))}
+                            </datalist>
+                            <p className="mt-2 text-[11px] leading-5 text-muted">
+                              Active targets: {policyTargets.join(", ") || "none"}
+                            </p>
+                          </label>
+                        ) : (
+                          <div className="mt-3 space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              {(skill.policy_aliases ?? []).length > 0 ? (
+                                (skill.policy_aliases ?? []).map((alias) => (
+                                  <span key={alias} className="rounded-ui border border-border bg-surface px-2 py-1 font-mono text-[11px] text-muted">
+                                    {alias}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-xs text-muted">No policy aliases.</span>
+                              )}
+                            </div>
+                            <div className="text-[11px] leading-5 text-muted">
+                              Matched Policies:{" "}
+                              {(skill.matched_policies ?? []).length > 0
+                                ? (skill.matched_policies ?? []).map((policy) => `${policy.policy_id} (${policy.decision})`).join(", ")
+                                : "none"}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <div className="flex items-center justify-between gap-2">
@@ -693,6 +795,17 @@ function skillWhatItDoes(skill: SkillRecord) {
   const body = typeof snapshot.body === "string" ? snapshot.body.trim() : "";
   if (body) return body.length > 260 ? `${body.slice(0, 260)}...` : body;
   return skill.description ?? "No behavior summary available.";
+}
+
+function policyTargetKeys(policy: PolicyRecord) {
+  const skill = recordFrom(policy.when).skill;
+  if (typeof skill === "string" && skill.trim().length > 0) return [skill.trim()];
+  if (Array.isArray(skill)) return skill.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim());
+  return [];
+}
+
+function safeDomId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function EvidenceTaskField({

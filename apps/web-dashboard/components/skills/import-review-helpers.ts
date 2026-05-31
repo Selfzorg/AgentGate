@@ -207,7 +207,11 @@ export function inferPolicyAliasesForCandidate(candidate: {
     if (/\b(prod|production)\b/.test(text)) aliases.push("deploy-production");
     if (/\b(staging|stage)\b/.test(text)) aliases.push("deploy-staging");
   }
-  if (category === "database" || /\b(migration|migrate|prisma|database|schema)\b/.test(text)) aliases.push("run-db-migration");
+  if (looksLikeDropTable(text)) {
+    aliases.push("drop-table");
+  } else if (category === "database" && /\b(migration|migrate|prisma|schema|apply[-_\s]?migration)\b/.test(text)) {
+    aliases.push("run-db-migration");
+  }
   return uniqueStrings(aliases);
 }
 
@@ -298,6 +302,14 @@ function stringArray(value: unknown) {
 
 function stringFrom(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function looksLikeDropTable(text: string) {
+  return (
+    /\bdrop[-_\s]?table\b/.test(text) ||
+    /\btruncate[-_\s]?table\b/.test(text) ||
+    (/\b(drop|truncate)\b/.test(text) && /\b(table|database table)\b/.test(text))
+  );
 }
 
 function recordFrom(value: unknown): Record<string, unknown> {

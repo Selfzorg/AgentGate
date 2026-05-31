@@ -134,6 +134,34 @@ export async function updateSkillEvidenceTasks(
   };
 }
 
+export async function updateSkillPolicyBindings(
+  skillId: string,
+  policyAliases: string[]
+): Promise<{
+  skill_version: { id: string; skill_id: string; version: string; status: string; policy_aliases: string[] };
+  warnings?: string[];
+  noop?: boolean;
+}> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/skills/${encodeURIComponent(skillId)}/policy-bindings`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      policy_aliases: policyAliases
+    }),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return (await response.json()) as {
+    skill_version: { id: string; skill_id: string; version: string; status: string; policy_aliases: string[] };
+    warnings?: string[];
+    noop?: boolean;
+  };
+}
+
 export async function rejectSkillImportBatch(batchId: string, comment?: string): Promise<{ import_batch: SkillImportBatch }> {
   const response = await fetch(`${apiBaseUrl}/api/v1/registry/import-batches/${encodeURIComponent(batchId)}/reject`, {
     method: "POST",

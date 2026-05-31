@@ -8,7 +8,10 @@ import { createId } from "../services/id";
 import {
   exportPolicyPack,
   importPolicyPack,
-  listPolicyPacks
+  listPolicyPacks,
+  serializePolicyWithVersion,
+  setPolicyStatus,
+  upsertPolicyRule
 } from "../services/policy-registry-service";
 
 const skillsQuerySchema = z.object({
@@ -40,9 +43,36 @@ const updateEvidenceTasksSchema = z.object({
   updated_by: z.string().min(1).optional()
 });
 
+const updatePolicyBindingsSchema = z.object({
+  policy_aliases: z.array(z.string()),
+  updated_by: z.string().min(1).optional()
+});
+
 const tenantWorkspaceQuerySchema = z.object({
   tenant_id: z.string().min(1).default("tenant_demo"),
   workspace_id: z.string().min(1).default("workspace_demo")
+});
+
+const policyQuerySchema = tenantWorkspaceQuerySchema.extend({
+  include_inactive: z.enum(["true", "false"]).optional()
+});
+
+const policyParamsSchema = z.object({
+  id: z.string().min(1)
+});
+
+const policyRuleSchema = z.object({
+  tenant_id: z.string().min(1).default("tenant_demo"),
+  workspace_id: z.string().min(1).default("workspace_demo"),
+  policy_id: z.string().min(1),
+  name: z.string().min(1),
+  priority: z.number().int(),
+  decision: z.enum(["ALLOW", "DENY", "REQUIRE_APPROVAL", "FORCE_DRY_RUN"]),
+  reason: z.string().min(1),
+  when: z.record(z.unknown()).refine((value) => Object.keys(value).length > 0, "Policy must include at least one when condition."),
+  required_checks: z.array(z.string()).optional(),
+  approvers: z.array(z.string()).optional(),
+  updated_by: z.string().min(1).optional()
 });
 
 const policyPackParamsSchema = z.object({
@@ -75,17 +105,34 @@ const policyPackImportSchema = z.object({
 export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
   app.get("/skills", async (request) => {
     const query = skillsQuerySchema.parse(request.query);
-    const skills = await app.services.prisma.skill.findMany({
-      where: query.include_inactive === "true" ? {} : { status: "active" },
-      include: {
-        versions: {
-          orderBy: { createdAt: "desc" },
-          include: {
-            connector: true
+    const [skills, activePolicies] = await Promise.all([
+      app.services.prisma.skill.findMany({
+        where: query.include_inactive === "true" ? {} : { status: "active" },
+        include: {
+          versions: {
+            orderBy: { createdAt: "desc" },
+            include: {
+              connector: true
+            }
           }
-        }
-      },
-      orderBy: [{ category: "asc" }, { skillId: "asc" }]
+        },
+        orderBy: [{ category: "asc" }, { skillId: "asc" }]
+      }),
+      app.services.prisma.policy.findMany({
+        where: { status: "active" },
+        include: {
+          versions: {
+            where: { status: "active" },
+            orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+            take: 1
+          }
+        },
+        orderBy: { policyId: "asc" }
+      })
+    ]);
+    const policySummaries = activePolicies.flatMap((policy) => {
+      const version = policy.versions[0];
+      return version ? [serializePolicyWithVersion(policy, version)] : [];
     });
     const filteredSkills = query.source
       ? skills.filter((skill) => skill.versions.some((version) => sourceTypeFromConfig(version.config) === query.source))
@@ -94,6 +141,8 @@ export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
     return {
       skills: filteredSkills.map((skill) => {
         const version = skill.versions.find((candidate) => candidate.status === "active") ?? skill.versions[0];
+        const config = recordFrom(version?.config);
+        const policyAliases = stringArray(config.policy_aliases);
         return {
           id: skill.id,
           skill_id: skill.skillId,
@@ -107,7 +156,12 @@ export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
           connector: version?.connector?.connectorId ?? null,
           config: version?.config ?? {},
           execution: version?.execution ?? {},
-          evidence_tasks: normalizeEvidenceTaskSpecs(recordFrom(version?.config).evidence_tasks).tasks
+          evidence_tasks: normalizeEvidenceTaskSpecs(config.evidence_tasks).tasks,
+          policy_aliases: policyAliases,
+          matched_policies: matchedPoliciesForSkill(skill.skillId, policyAliases, policySummaries, {
+            tenantId: skill.tenantId,
+            workspaceId: skill.workspaceId
+          })
         };
       })
     };
@@ -133,6 +187,18 @@ export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(result.status).send(result.body);
   });
 
+  app.post("/skills/:id/policy-bindings", async (request, reply) => {
+    const params = skillParamsSchema.parse(request.params);
+    const body = updatePolicyBindingsSchema.parse(request.body);
+    const result = await updateSkillPolicyBindings(app.services.prisma, {
+      skillIdentifier: params.id,
+      policyAliases: body.policy_aliases,
+      updatedBy: body.updated_by
+    });
+
+    return reply.code(result.status).send(result.body);
+  });
+
   app.post("/skills/:id/versions/:version/enable", async (request, reply) => {
     const params = skillVersionParamsSchema.parse(request.params);
     const result = await setSkillVersionStatus(app.services.prisma, params.id, params.version, "active");
@@ -145,12 +211,18 @@ export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(result.status).send(result.body);
   });
 
-  app.get("/policies", async () => {
+  app.get("/policies", async (request) => {
+    const query = policyQuerySchema.parse(request.query);
     const policies = await app.services.prisma.policy.findMany({
-      where: { status: "active" },
+      where: {
+        tenantId: query.tenant_id,
+        workspaceId: query.workspace_id,
+        ...(query.include_inactive === "true" ? {} : { status: "active" as const })
+      },
       include: {
         versions: {
-          orderBy: { priority: "desc" },
+          where: { status: "active" },
+          orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
           take: 1
         }
       },
@@ -160,25 +232,61 @@ export const registerCatalogRoutes: FastifyPluginAsync = async (app) => {
     return {
       policies: policies.map((policy) => {
         const version = policy.versions[0];
-        return {
-          id: policy.id,
-          policy_id: policy.policyId,
-          name: policy.name,
-          version: version?.version ?? "unknown",
-          priority: version?.priority ?? 0,
-          decision: version?.decision ?? "ALLOW",
-          reason: version?.reason ?? "",
-          definition: version?.definition ?? {},
-          required_checks: version?.requiredChecks ?? [],
-          approvers: version?.approvers ?? []
-        };
+        return serializePolicyWithVersion(policy, version ?? null);
       })
     };
   });
 
-  app.get("/policies/conflicts", async () => {
+  app.post("/policies", async (request, reply) => {
+    const body = policyRuleSchema.parse(request.body);
+    const result = await upsertPolicyRule(app.services.prisma, {
+      tenantId: body.tenant_id,
+      workspaceId: body.workspace_id,
+      policyId: body.policy_id,
+      name: body.name,
+      priority: body.priority,
+      when: body.when,
+      decision: body.decision,
+      reason: body.reason,
+      requiredChecks: body.required_checks,
+      approvers: body.approvers,
+      updatedBy: body.updated_by
+    });
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/policies/:id/disable", async (request, reply) => {
+    const params = policyParamsSchema.parse(request.params);
+    const query = tenantWorkspaceQuerySchema.parse(request.query);
+    const result = await setPolicyStatus(app.services.prisma, {
+      tenantId: query.tenant_id,
+      workspaceId: query.workspace_id,
+      policyIdentifier: params.id,
+      status: "inactive"
+    });
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.post("/policies/:id/enable", async (request, reply) => {
+    const params = policyParamsSchema.parse(request.params);
+    const query = tenantWorkspaceQuerySchema.parse(request.query);
+    const result = await setPolicyStatus(app.services.prisma, {
+      tenantId: query.tenant_id,
+      workspaceId: query.workspace_id,
+      policyIdentifier: params.id,
+      status: "active"
+    });
+    return reply.code(result.status).send(result.body);
+  });
+
+  app.get("/policies/conflicts", async (request) => {
+    const query = tenantWorkspaceQuerySchema.parse(request.query);
     const policies = await app.services.prisma.policy.findMany({
-      where: { status: "active" },
+      where: {
+        tenantId: query.tenant_id,
+        workspaceId: query.workspace_id,
+        status: "active"
+      },
       include: {
         versions: {
           where: { status: "active" },
@@ -445,6 +553,163 @@ async function updateSkillEvidenceTasks(
   };
 }
 
+async function updateSkillPolicyBindings(
+  prisma: PrismaClient,
+  input: {
+    skillIdentifier: string;
+    policyAliases: string[];
+    updatedBy?: string | undefined;
+  }
+) {
+  const policyAliases = uniqueStrings(input.policyAliases);
+  const skill = await prisma.skill.findFirst({
+    where: {
+      OR: [{ id: input.skillIdentifier }, { skillId: input.skillIdentifier }]
+    },
+    include: {
+      versions: {
+        where: { status: "active" },
+        orderBy: { createdAt: "desc" },
+        take: 1
+      }
+    }
+  });
+
+  if (!skill) return { status: 404 as const, body: { error: "Skill not found" } };
+  const activeVersion = skill.versions[0];
+  if (!activeVersion) return { status: 409 as const, body: { error: "Skill does not have an active version" } };
+
+  const activePolicies = await prisma.policy.findMany({
+    where: {
+      tenantId: skill.tenantId,
+      workspaceId: skill.workspaceId,
+      status: "active"
+    },
+    include: {
+      versions: {
+        where: { status: "active" },
+        orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+        take: 1
+      }
+    },
+    orderBy: { policyId: "asc" }
+  });
+  const policySummaries = activePolicies.flatMap((policy) => {
+    const version = policy.versions[0];
+    return version ? [serializePolicyWithVersion(policy, version)] : [];
+  });
+  const targetKeys = new Set(policySummaries.flatMap(policyTargetKeys));
+  const warnings = policyAliases
+    .filter((alias) => !targetKeys.has(alias))
+    .map((alias) => `Policy alias ${alias} does not match an active policy target.`);
+  const currentAliases = stringArray(recordFrom(activeVersion.config).policy_aliases);
+  const matchedPolicies = matchedPoliciesForSkill(skill.skillId, policyAliases, policySummaries, {
+    tenantId: skill.tenantId,
+    workspaceId: skill.workspaceId
+  });
+
+  if (arraysEqual(currentAliases, policyAliases)) {
+    return {
+      status: 200 as const,
+      body: {
+        skill_version: {
+          id: activeVersion.id,
+          skill_id: skill.skillId,
+          version: activeVersion.version,
+          status: activeVersion.status,
+          config: activeVersion.config,
+          execution: activeVersion.execution,
+          policy_aliases: policyAliases,
+          matched_policies: matchedPolicies
+        },
+        warnings,
+        noop: true
+      }
+    };
+  }
+
+  const now = new Date();
+  const nextVersion = `policy-${createId("rev").replace(/^rev_/, "").slice(0, 12)}`;
+  const nextConfig = {
+    ...recordFrom(activeVersion.config),
+    policy_aliases: policyAliases,
+    policy_review: {
+      ...recordFrom(recordFrom(activeVersion.config).policy_review),
+      policy_aliases: policyAliases,
+      matched_policy_ids: matchedPolicies.map((policy) => policy.policy_id),
+      warnings,
+      edited_at: now.toISOString(),
+      edited_by: input.updatedBy ?? "user_policy_admin",
+      source: "skills_registry"
+    }
+  };
+
+  const created = await prisma.$transaction(async (tx) => {
+    await tx.skillVersion.updateMany({
+      where: {
+        skillRecordId: skill.id,
+        status: "active"
+      },
+      data: { status: "inactive" }
+    });
+
+    const skillVersion = await tx.skillVersion.create({
+      data: {
+        id: createId("skillver"),
+        tenantId: skill.tenantId,
+        workspaceId: skill.workspaceId,
+        skillRecordId: skill.id,
+        connectorId: activeVersion.connectorId,
+        version: nextVersion,
+        status: "active",
+        config: nextConfig as Prisma.InputJsonValue,
+        execution: (activeVersion.execution ?? {}) as Prisma.InputJsonValue
+      }
+    });
+
+    await tx.skill.update({
+      where: { id: skill.id },
+      data: { status: "active" }
+    });
+
+    await emitAuditEvent(tx, {
+      tenantId: skill.tenantId,
+      workspaceId: skill.workspaceId,
+      traceId: createId("trc"),
+      eventType: "skill.policy_bindings.updated",
+      actorType: "user",
+      actorId: input.updatedBy ?? "user_policy_admin",
+      metadata: {
+        skill_id: skill.skillId,
+        previous_version: activeVersion.version,
+        new_version: nextVersion,
+        policy_aliases: policyAliases,
+        matched_policy_ids: matchedPolicies.map((policy) => policy.policy_id),
+        warnings
+      }
+    });
+
+    return skillVersion;
+  });
+
+  return {
+    status: 201 as const,
+    body: {
+      skill_version: {
+        id: created.id,
+        skill_id: skill.skillId,
+        version: created.version,
+        status: created.status,
+        config: created.config,
+        execution: created.execution,
+        policy_aliases: policyAliases,
+        matched_policies: matchedPolicies
+      },
+      warnings
+    }
+  };
+}
+
 function sourceTypeFromConfig(config: unknown): string | null {
   const record = config && typeof config === "object" && !Array.isArray(config) ? (config as Record<string, unknown>) : {};
   const source = record.source && typeof record.source === "object" && !Array.isArray(record.source) ? (record.source as Record<string, unknown>) : {};
@@ -480,6 +745,44 @@ function conflictReportForPolicies(
       }
     ];
   });
+}
+
+type SerializedPolicy = ReturnType<typeof serializePolicyWithVersion>;
+
+function matchedPoliciesForSkill(
+  skillId: string,
+  policyAliases: string[],
+  policies: SerializedPolicy[],
+  scope: { tenantId: string; workspaceId: string }
+) {
+  const skillTargets = new Set([skillId, ...policyAliases]);
+  return policies
+    .filter((policy) => policy.tenant_id === scope.tenantId && policy.workspace_id === scope.workspaceId)
+    .filter((policy) => policyTargetKeys(policy).some((target) => skillTargets.has(target)))
+    .sort((left, right) => right.priority - left.priority);
+}
+
+function policyTargetKeys(policy: Pick<SerializedPolicy, "when">): string[] {
+  const skill = recordFrom(policy.when).skill;
+  if (typeof skill === "string" && skill.trim().length > 0) return [skill.trim()];
+  if (Array.isArray(skill)) return stringArray(skill);
+  return [];
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim());
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function arraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  const normalizedLeft = [...left].sort();
+  const normalizedRight = [...right].sort();
+  return normalizedLeft.every((value, index) => normalizedRight[index] === value);
 }
 
 function stableJson(value: unknown): string {

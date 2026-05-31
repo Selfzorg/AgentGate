@@ -50,7 +50,9 @@ export function inferPolicyAliasesForCandidate(candidate: ImportedSkillGovernanc
     if (/\b(staging|stage)\b/.test(text)) aliases.push("deploy-staging");
   }
 
-  if (category === "database" || /\b(migration|migrate|prisma|database|schema)\b/.test(text)) {
+  if (looksLikeDropTable(text)) {
+    aliases.push("drop-table");
+  } else if (category === "database" && /\b(migration|migrate|prisma|schema|apply[-_\s]?migration)\b/.test(text)) {
     aliases.push("run-db-migration");
   }
 
@@ -134,6 +136,14 @@ function categoryFromCandidate(candidate: ImportedSkillGovernanceCandidate) {
   if (/merge|pull|pr|git|github/.test(text)) return "source_control";
   if (candidate.sideEffectLevel === "read_only") return "read_only";
   return "imported";
+}
+
+function looksLikeDropTable(text: string) {
+  return (
+    /\bdrop[-_\s]?table\b/.test(text) ||
+    /\btruncate[-_\s]?table\b/.test(text) ||
+    (/\b(drop|truncate)\b/.test(text) && /\b(table|database table)\b/.test(text))
+  );
 }
 
 function stringFrom(value: unknown): string | null {
